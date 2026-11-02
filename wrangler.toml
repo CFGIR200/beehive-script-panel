@@ -28,7 +28,7 @@ database_id = "<c37139df-914d-4adf-94d8-810ee7b54588>"
 #   wrangler kv namespace create BEEHIVE_CACHE
 [[kv_namespaces]]
 binding = "CACHE"
-id = "<KV_NAMESPACE_ID>"
+id = "<fdf16230d3b04e178aa39a70813f3f5f>"
 
 # Panel artifacts (the Bee.Hive panel bundle) and D1 backups.
 #   wrangler r2 bucket create beehive-artifacts
