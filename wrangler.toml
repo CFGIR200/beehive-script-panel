@@ -22,7 +22,7 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "beehive_bot"
-database_id = "<PANEL_D1_DATABASE_ID>"
+database_id = "<c37139df-914d-4adf-94d8-810ee7b54588>"
 
 # Cache / short-lived rate-limit counters.
 #   wrangler kv namespace create BEEHIVE_CACHE
