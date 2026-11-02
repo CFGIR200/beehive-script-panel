@@ -1,0 +1,34 @@
+{
+  "name": "beehive-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BEE.HIVE BOT — Telegram SaaS automation platform for provisioning and managing Bee.Hive panels on customer Cloudflare accounts.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "db:migrate:local": "wrangler d1 migrations apply beehive_bot --local",
+    "db:migrate:remote": "wrangler d1 migrations apply beehive_bot --remote",
+    "set:webhook": "node scripts/set-webhook.mjs",
+    "panel:upload": "node scripts/upload-panel-artifact.mjs",
+    "release": "node scripts/build-release.mjs",
+    "pretest": "node scripts/check-toolchain.mjs",
+    "doctor": "node scripts/check-toolchain.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.6.3",
+    "@cloudflare/workers-types": "4.20260702.1",
+    "typescript": "5.6.3",
+    "vitest": "2.1.8",
+    "wrangler": "4.86.0"
+  }
+}

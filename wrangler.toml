@@ -1,0 +1,64 @@
+# BEE.HIVE BOT — Cloudflare Workers deployment configuration
+# ---------------------------------------------------------------------------
+# Replace every <PLACEHOLDER> below. Nothing secret belongs in this file:
+# all secrets are set with `wrangler secret put <NAME>` (see docs/DEPLOYMENT.md).
+
+name = "beehive-bot"
+main = "src/index.ts"
+compatibility_date = "2025-03-10"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Drives resumable deployment jobs (long-running provisioning steps) and
+# housekeeping. Every minute is required for the job executor latency budget.
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
+
+# Bot database (users, panels, jobs, audit). Created with:
+#   wrangler d1 create beehive_bot
+[[d1_databases]]
+binding = "DB"
+database_name = "beehive_bot"
+database_id = "<PANEL_D1_DATABASE_ID>"
+
+# Cache / short-lived rate-limit counters.
+#   wrangler kv namespace create BEEHIVE_CACHE
+[[kv_namespaces]]
+binding = "CACHE"
+id = "<KV_NAMESPACE_ID>"
+
+# Panel artifacts (the Bee.Hive panel bundle) and D1 backups.
+#   wrangler r2 bucket create beehive-artifacts
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "beehive-artifacts"
+
+[vars]
+# ----- public, non-secret configuration --------------------------------
+ENVIRONMENT = "production"
+# Public HTTPS origin this Worker answers on (used for the one-time connect link).
+PUBLIC_BASE_URL = "https://beehive-bot.<YOUR-SUBDOMAIN>.workers.dev"
+BOT_USERNAME = "<YOUR_BOT_USERNAME>"
+# Telegram user id that is promoted to super_admin on first boot.
+BOOTSTRAP_ADMIN_TELEGRAM_ID = "0"
+# Artifact key inside the ARTIFACTS bucket holding the approved panel bundle.
+PANEL_ARTIFACT_KEY = "panel/beehive-panel-3.1.13.js"
+# Pinned target version metadata for the approved artifact.
+PANEL_ARTIFACT_VERSION = "3.1.13"
+# SHA-256 of the approved bundle, published in docs/INITIAL_AUDIT.md.
+PANEL_ARTIFACT_SHA256 = "b763b2f8b09d16d13f3b4971c1df069c7c428f0955b28fe78f1009515796eab4"
+# Cloudflare compatibility date stamped onto provisioned panel Workers.
+PANEL_COMPATIBILITY_DATE = "2025-03-10"
+# Cron schedule applied to provisioned panels.
+PANEL_CRON = "0 * * * *"
+# Max milliseconds a single job pass may spend inside one HTTP request.
+JOB_SLICE_MS = "22000"
+# Feature flag: allow self-service panel installs (plans still apply).
+FEATURE_SELF_SERVE_INSTALL = "true"
+# Feature flag: payments. No payment provider is wired up in v1.0.0.
+FEATURE_PAYMENTS = "false"
+# Support contact shown in /help.
+SUPPORT_CONTACT = "@BEESELL_GP"
