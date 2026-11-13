@@ -188,6 +188,18 @@ export const fa = {
   updateStart: (version: string) => `🔄 <b>به‌روزرسانی پنل</b> به نسخهٔ <code>${escapeTelegram(version)}</code> شروع شد.`,
   updateNotAllowed: "پلن فعلی شما امکان به‌روزرسانی ندارد.",
 
+  // Cron-driven notice: a newer approved panel version is available. The
+  // one-tap button routes into panel:update_go, so the update runs through the
+  // exact same job pipeline as the manual flow.
+  updateNotifyAvailable: (input: { workerName: string; from: string; to: string }) =>
+    `🆙 <b>به‌روزرسانی جدید برای پنل شما در دسترس است</b>\n\n` +
+    `• پنل: <b>${escapeTelegram(input.workerName)}</b>\n` +
+    `• نسخهٔ نصب‌شده: <code>${escapeTelegram(input.from)}</code>\n` +
+    `• نسخهٔ جدید: <code>${escapeTelegram(input.to)}</code>\n\n` +
+    `با زدن دکمهٔ زیر، پنل روی حساب Cloudflare خودتان به نسخهٔ جدید ارتقا می‌یابد.\n` +
+    `داده‌های پنل (کاربران، تنظیمات و کتابخانهٔ کانفیگ‌های اکسترنال) روی همان پایگاه D1 باقی می‌مانند و ` +
+    `تغییرات سفارشی نسخه نیز در به‌روزرسانی حفظ می‌شود.`,
+
   backupNotAllowed: "پلن فعلی شما امکان پشتیبان‌گیری ندارد.",
   backupStart: "💾 تهیهٔ نسخهٔ پشتیبان شروع شد. نتیجه اطلاع داده می‌شود.",
   backupDone: (input: { size: string; backupId: string }) =>

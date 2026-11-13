@@ -346,6 +346,9 @@ async function handleAdminCallback(
     case "toggle_maintenance":
       await admin.adminToggleSetting(ctx, "maintenance_mode");
       return;
+    case "toggle_update_notify":
+      await admin.adminToggleSetting(ctx, "update_notify_enabled");
+      return;
     case "infra":
       await admin.adminInfra(ctx);
       return;

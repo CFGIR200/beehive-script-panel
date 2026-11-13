@@ -34,6 +34,10 @@ export interface Panel {
   last_health_check_at: number | null;
   last_health_status: string | null;
   last_health_latency_ms: number | null;
+  /** Target version the owner was last notified about (update notifications). */
+  update_notified_version: string | null;
+  /** When that notice was sent (ms epoch). */
+  update_notice_at: number | null;
   installed_at: number | null;
   updated_at: number;
   deleted_at: number | null;
@@ -309,6 +313,63 @@ export async function liveResourcesOf(env: Env, panelId: number): Promise<PanelR
   return all<PanelResource>(
     env,
     "SELECT * FROM panel_resources WHERE panel_id = ? AND deleted_at IS NULL ORDER BY id ASC",
+    panelId,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Update notifications
+// ---------------------------------------------------------------------------
+
+export interface OutdatedPanelRow {
+  id: number;
+  worker_name: string;
+  version: string;
+  user_telegram_id: number;
+}
+
+/**
+ * Active panels that are behind the approved latest version and are due a
+ * Telegram notice: either never notified for this target version, or the last
+ * notice is older than the reminder interval. Blocked owners and non-active
+ * panels (updating/deleting/deleted/failed) never match.
+ */
+export async function listOutdatedForNotify(env: Env, input: {
+  latestVersion: string;
+  renotifyBefore: number;
+  limit: number;
+}): Promise<OutdatedPanelRow[]> {
+  return all<OutdatedPanelRow>(
+    env,
+    `SELECT p.id, p.worker_name, p.version, u.telegram_id AS user_telegram_id
+       FROM panels p
+       JOIN users u ON u.id = p.user_id
+      WHERE p.deleted_at IS NULL
+        AND p.status = 'active'
+        AND p.version IS NOT NULL
+        AND p.version != ?
+        AND u.is_blocked = 0
+        AND NOT (
+          p.update_notified_version = ?
+          AND p.update_notice_at IS NOT NULL
+          AND p.update_notice_at > ?
+        )
+      ORDER BY COALESCE(p.update_notice_at, 0) ASC, p.id ASC
+      LIMIT ?`,
+    input.latestVersion,
+    input.latestVersion,
+    input.renotifyBefore,
+    input.limit,
+  );
+}
+
+/** Records that the owner was notified about `version` (dedupes future checks). */
+export async function markUpdateNotified(env: Env, panelId: number, version: string): Promise<void> {
+  await run(
+    env,
+    "UPDATE panels SET update_notified_version = ?, update_notice_at = ? WHERE id = ?",
+    version,
+    now(),
     panelId,
   );
 }

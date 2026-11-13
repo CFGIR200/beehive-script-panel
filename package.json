@@ -20,6 +20,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply beehive_bot --remote",
     "set:webhook": "node scripts/set-webhook.mjs",
     "panel:upload": "node scripts/upload-panel-artifact.mjs",
+    "panel:patch": "node scripts/patch-panel-bundle.mjs",
     "release": "node scripts/build-release.mjs",
     "pretest": "node scripts/check-toolchain.mjs",
     "doctor": "node scripts/check-toolchain.mjs"

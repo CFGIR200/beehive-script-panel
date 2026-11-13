@@ -321,10 +321,12 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
   const settings = await settingsRepo.all_(ctx.env);
   const installEnabled = settings.install_enabled === "1";
   const maintenance = settings.maintenance_mode === "1";
+  const updateNotify = settings.update_notify_enabled !== "0";
   await ctx.edit(
     `⚙️ <b>تنظیمات سیستم</b>\n\n` +
       `• نصب پنل: ${installEnabled ? "فعال" : "غیرفعال"}\n` +
       `• حالت تعمیرات: ${maintenance ? "فعال" : "غیرفعال"}\n` +
+      `• اعلان به‌روزرسانی پنل: ${updateNotify ? "فعال" : "غیرفعال"}\n` +
       `• پلن پیش‌فرض: <code>${escape(settings.default_plan ?? "free")}</code>\n` +
       `• هم‌زمانی سراسری: ${toPersianDigits(Number(settings.max_global_concurrency ?? 6))}`,
     {
@@ -333,6 +335,7 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
         inline_keyboard: [
           [{ text: installEnabled ? "⏸ غیرفعال‌کردن نصب" : "▶️ فعال‌کردن نصب", callback_data: "adm:toggle_install" }],
           [ { text: maintenance ? "🟢 خروج از تعمیرات" : "🛑 حالت تعمیرات", callback_data: "adm:toggle_maintenance" }],
+          [{ text: updateNotify ? "🔔 خاموش‌کردن اعلان به‌روزرسانی" : "🔔 روشن‌کردن اعلان به‌روزرسانی", callback_data: "adm:toggle_update_notify" }],
           [{ text: "🔙 پنل مدیریت", callback_data: "adm:home" }],
         ],
       },
@@ -340,7 +343,10 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
   );
 }
 
-export async function adminToggleSetting(ctx: BotContext, key: "install_enabled" | "maintenance_mode"): Promise<void> {
+export async function adminToggleSetting(
+  ctx: BotContext,
+  key: "install_enabled" | "maintenance_mode" | "update_notify_enabled",
+): Promise<void> {
   requireAdmin(ctx);
   const current = await settingsRepo.get(ctx.env, key, "0");
   const next = current === "1" ? "0" : "1";

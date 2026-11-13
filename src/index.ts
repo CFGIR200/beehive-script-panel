@@ -19,6 +19,8 @@ import * as panelsRepo from "./database/repositories/panels";
 import * as pendingRepo from "./database/repositories/pending";
 import { prune as pruneRateLimits } from "./security/rate-limit";
 import { pruneBackups } from "./database/repositories/panels";
+import { TelegramClient } from "./bot/telegram";
+import { runUpdateCheck } from "./updates/notify";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -78,6 +80,19 @@ export default {
         await auditRepo.prune(env, 90);
       } catch (error) {
         logger.warn("housekeeping failed", { error });
+      }
+
+      // 3.5. Panel update notifications: tell owners of outdated panels that a
+      // newer approved version exists, with a one-tap update button. Throttled
+      // and deduped internally (see src/updates/notify.ts).
+      try {
+        const telegram = new TelegramClient(env.TELEGRAM_BOT_TOKEN, { traceId: "cron_update_notify" });
+        const result = await runUpdateCheck(env, config, telegram);
+        if (result.notified > 0 || result.failed > 0) {
+          logger.info("update notifications sent", { ...result });
+        }
+      } catch (error) {
+        logger.warn("update notify failed", { error });
       }
 
       // 4. Mark stale provisioning panels as failed so they are never orphaned.
