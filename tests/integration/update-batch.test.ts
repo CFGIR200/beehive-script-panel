@@ -46,18 +46,18 @@ function mockTelegramFetch(): void {
   }) as typeof fetch;
 }
 
-/** Inserts an active panel owned by `user` with the given installed version. */
+/** Inserts an active panel owned by `user` with the given installed version/build. */
 async function seedPanel(
   userId: number,
   accountRef: number,
   workerName: string,
-  options: { version?: string | null; status?: string } = {},
+  options: { version?: string | null; status?: string; artifactSha256?: string | null } = {},
 ): Promise<number> {
   const ts = Date.now();
   const result = await testEnv.DB.prepare(
     `INSERT INTO panels (uid, user_id, account_ref, cloudflare_account_id, worker_name, d1_database_name,
-        status, version, deleted_at, updated_at)
-     VALUES (?, ?, ?, 'acc-test', ?, 'db-test', ?, ?, NULL, ?)`,
+        status, version, artifact_sha256, deleted_at, updated_at)
+     VALUES (?, ?, ?, 'acc-test', ?, 'db-test', ?, ?, ?, NULL, ?)`,
   )
     .bind(
       `uid-${workerName}`,
@@ -66,6 +66,7 @@ async function seedPanel(
       workerName,
       options.status ?? "active",
       options.version === undefined ? "3.1.12" : options.version,
+      options.artifactSha256 === undefined ? null : options.artifactSha256,
       ts,
     )
     .run();
@@ -133,7 +134,12 @@ describe("startUpdateBatch", () => {
   it("skips current and busy panels with the right reasons", async () => {
     const user = await seedUser(9202, "updall-skip");
     const account = await seedAccount(user.id);
-    const current = await seedPanel(user.id, account.id, "bee-all-current", { version: config.artifactVersion });
+    // "Current" needs BOTH the version and the approved build digest — a panel
+    // seeded without the digest is treated as running the unpatched build.
+    const current = await seedPanel(user.id, account.id, "bee-all-current", {
+      version: config.artifactVersion,
+      artifactSha256: config.artifactSha256,
+    });
     const busy = await seedPanel(user.id, account.id, "bee-all-busy");
     await seedBusyJob(user.id, busy);
 
@@ -236,6 +242,27 @@ describe("startUpdateBatch", () => {
     expect(jobA?.telegram_chat_id).toBe(expectedChat(batch.queued[0]!.panelId));
     expect(jobB?.telegram_chat_id).toBe(expectedChat(batch.queued[1]!.panelId));
   });
+  it("queues an update for a panel on the right version but a stale build", async () => {
+    // The patched and unpatched 3.1.13 bundles share one version string. A
+    // panel installed from the original vendor build (no digest recorded) must
+    // NOT be treated as current — the batch has to bring it to the patched
+    // artifact or the customer would never receive the BEEHIVE patches.
+    const user = await seedUser(9212, "updall-stale");
+    const account = await seedAccount(user.id);
+    const stale = await seedPanel(user.id, account.id, "bee-all-stale", { version: config.artifactVersion });
+
+    const batch = await startUpdateBatch(testEnv, config, {
+      panelIds: [stale],
+      actorType: "telegram_user",
+      actorId: user.id,
+      telegramChatId: null,
+    });
+
+    expect(batch.queued.map((item) => item.panelId)).toEqual([stale]);
+    expect(batch.skipped).toEqual([]);
+    const job = await jobsRepo.findById(testEnv, batch.queued[0]!.jobId);
+    expect(job?.kind).toBe("update");
+  });
 });
 
 describe("bulk update repo helpers", () => {
@@ -243,13 +270,33 @@ describe("bulk update repo helpers", () => {
     const user = await seedUser(9209, "updall-count");
     const account = await seedAccount(user.id);
     const outdated = await seedPanel(user.id, account.id, "bee-count-old");
-    await seedPanel(user.id, account.id, "bee-count-new", { version: config.artifactVersion });
+    await seedPanel(user.id, account.id, "bee-count-new", {
+      version: config.artifactVersion,
+      artifactSha256: config.artifactSha256,
+    });
 
-    expect(await panelsRepo.countOutdatedForUser(testEnv, user.id, config.artifactVersion)).toBe(1);
-    expect((await panelsRepo.listOutdatedForUser(testEnv, { userId: user.id, latestVersion: config.artifactVersion })).map((row) => row.id)).toEqual([outdated]);
-    expect(await panelsRepo.countOutdatedAll(testEnv, config.artifactVersion)).toBeGreaterThanOrEqual(1);
-    const allRows = await panelsRepo.listOutdatedAll(testEnv, { latestVersion: config.artifactVersion, limit: 200 });
+    expect(await panelsRepo.countOutdatedForUser(testEnv, user.id, config.artifactVersion, config.artifactSha256)).toBe(1);
+    expect(
+      (await panelsRepo.listOutdatedForUser(testEnv, { userId: user.id, latestVersion: config.artifactVersion, expectedSha256: config.artifactSha256 })).map((row) => row.id),
+    ).toEqual([outdated]);
+    expect(await panelsRepo.countOutdatedAll(testEnv, config.artifactVersion, config.artifactSha256)).toBeGreaterThanOrEqual(1);
+    const allRows = await panelsRepo.listOutdatedAll(testEnv, { latestVersion: config.artifactVersion, expectedSha256: config.artifactSha256, limit: 200 });
     expect(allRows.find((row) => row.id === outdated)?.user_telegram_id).toBe(user.telegram_id);
+  });
+
+  it("treats a same-version panel with a stale or missing build digest as outdated", async () => {
+    const user = await seedUser(9213, "updall-digest");
+    const account = await seedAccount(user.id);
+    const stale = await seedPanel(user.id, account.id, "bee-digest-stale", { version: config.artifactVersion });
+
+    expect(await panelsRepo.countOutdatedForUser(testEnv, user.id, config.artifactVersion, config.artifactSha256)).toBe(1);
+
+    // Converges after the approved digest is recorded (what the update job's
+    // finalize step does).
+    await testEnv.DB.prepare("UPDATE panels SET artifact_sha256 = ? WHERE id = ?")
+      .bind(config.artifactSha256, stale)
+      .run();
+    expect(await panelsRepo.countOutdatedForUser(testEnv, user.id, config.artifactVersion, config.artifactSha256)).toBe(0);
   });
 });
 

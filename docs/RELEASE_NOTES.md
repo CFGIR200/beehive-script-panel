@@ -111,3 +111,12 @@ Five defects found by the suite were fixed before release (see `docs/TESTING.md`
 * **UPDALL-1** — "update all opened panels" straight from the bot: user-level and admin-level bulk update
   (`startUpdateBatch`), optional cron auto-apply (`update_auto_apply`, migration `0008`). Tests: 112 across
   11 files, `tsc --noEmit` clean. See `docs/UPDATES.md` §4.
+* **UPDDIGEST-1** — build-level currency: "up to date" now requires BOTH the version string and the
+  recorded `panels.artifact_sha256` build digest to match the approved artifact. The patched BEEHIVE
+  bundle and the original vendor bundle both report version `3.1.13`, so version-only comparison made
+  panels running the unpatched build permanently "current" — pressing "به‌روزرسانی" answered "already on
+  3.1.13" and the patches never arrived. Affected panels are now flagged outdated exactly once and
+  converge to the patched build via the Telegram notice, the "به‌روزرسانی همه" button, or the
+  `update_auto_apply` cron; the update screen shows a dedicated "stale build" note for them. The cron
+  refuses to notify when `PANEL_ARTIFACT_SHA256` disagrees with the `panel_versions` registry (half-applied
+  release guard). Tests: 116 across 11 files, `tsc --noEmit` clean. See `docs/UPDATES.md` §1.

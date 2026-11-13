@@ -289,7 +289,7 @@ export async function showPanels(ctx: BotContext): Promise<void> {
     await ctx.edit(fa.panelsEmpty, { reply_markup: mainMenuKeyboard(ctx.identity.isStaff) });
     return;
   }
-  const outdated = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion);
+  const outdated = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion, ctx.config.artifactSha256);
   await ctx.edit(fa.panelsList(views.length), {
     parse_mode: "HTML",
     reply_markup: panelsKeyboard(
@@ -320,7 +320,7 @@ export function summarizeUpdateBatch(batch: UpdateBatchResult, to: string): {
  * the Worker script, so customer data and the baked-in patches always survive.
  */
 export async function confirmUpdateAll(ctx: BotContext): Promise<void> {
-  const count = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion);
+  const count = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion, ctx.config.artifactSha256);
   if (!count) {
     await ctx.edit(fa.updateAllNone, { reply_markup: backToMainKeyboard() });
     return;
@@ -340,6 +340,7 @@ export async function launchUpdateAll(ctx: BotContext): Promise<void> {
   const rows = await panelsRepo.listOutdatedForUser(ctx.env, {
     userId: ctx.identity.user.id,
     latestVersion: ctx.config.artifactVersion,
+    expectedSha256: ctx.config.artifactSha256,
   });
   if (!rows.length) {
     await ctx.edit(fa.updateAllNone, { reply_markup: backToMainKeyboard() });
@@ -439,7 +440,14 @@ export async function showUpdateOptions(ctx: BotContext, panelId: number): Promi
     await ctx.edit(fa.panelNotFound, { reply_markup: backToMainKeyboard() });
     return;
   }
-  if (panel.version === ctx.config.artifactVersion) {
+  // "Current" means the approved build, not just the approved version string:
+  // the patched and unpatched 3.1.13 bundles share one version number, so the
+  // recorded build digest decides whether the panel really is up to date.
+  const registered = await panelsRepo.findVersion(ctx.env, ctx.config.artifactVersion);
+  const targetSha = (registered?.artifact_sha256 ?? ctx.config.artifactSha256 ?? "").toLowerCase();
+  const versionCurrent = panel.version === ctx.config.artifactVersion;
+  const buildCurrent = !targetSha || (panel.artifact_sha256 ?? "").toLowerCase() === targetSha;
+  if (versionCurrent && buildCurrent) {
     await ctx.edit(fa.updateNoop(panel.version ?? "—"), {
       parse_mode: "HTML",
       reply_markup: {
@@ -451,8 +459,12 @@ export async function showUpdateOptions(ctx: BotContext, panelId: number): Promi
     });
     return;
   }
+  const staleBuildNote = versionCurrent && !buildCurrent
+    ? `⚠️ نسخهٔ نصب‌شده درست است اما <b>بیلدِ قدیمی</b> (بدون پچ‌های BEEHIVE) است؛ با به‌روزرسانی، بیلدِ پچ‌شدهٔ همین نسخه جایگزین می‌شود.\n\n`
+    : "";
   await ctx.edit(
     `🔄 به‌روزرسانی پنل <b>${escape(panel.worker_name)}</b>\n\n` +
+      staleBuildNote +
       `نسخهٔ فعلی: <code>${escape(panel.version ?? "—")}</code>\n` +
       `نسخهٔ مقصد: <code>${escape(ctx.config.artifactVersion)}</code>\n\n` +
       `داده‌های پنل روی همان پایگاه D1 می‌مانند و بازنویسی نمی‌شوند.`,

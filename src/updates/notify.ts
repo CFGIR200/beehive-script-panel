@@ -1,9 +1,10 @@
 /**
  * Panel update notifications and auto-apply.
  *
- * The cron trigger compares every active panel's installed version with the
- * approved latest version (PANEL_ARTIFACT_VERSION, cross-checked against the
- * `panel_versions` registry) and either:
+ * The cron trigger compares every active panel's installed version AND build
+ * digest with the approved latest artifact (PANEL_ARTIFACT_VERSION +
+ * PANEL_ARTIFACT_SHA256, cross-checked against the `panel_versions` registry)
+ * and either:
  *   • sends the owner a Telegram notice with a one-tap "update now" button
  *     wired to the existing `panel:update_go` flow (default), or
  *   • with the `update_auto_apply` setting on, queues an update job for every
@@ -81,6 +82,24 @@ export async function runUpdateCheck(
     return result;
   }
 
+  // The registry digest is what the deploy pipeline verifies against, so the
+  // approved PANEL_ARTIFACT_SHA256 var must agree with it. A mismatch means a
+  // half-applied release (var bumped, migration not run, or vice versa) —
+  // refuse to notify/auto-apply until the operator fixes the deployment.
+  const registeredSha = (registered.artifact_sha256 ?? "").toLowerCase();
+  const approvedSha = (config.artifactSha256 || "").toLowerCase();
+  if (registeredSha && approvedSha && registeredSha !== approvedSha) {
+    logger.warn("approved artifact digest does not match registry", {
+      version: config.artifactVersion,
+      registry: registeredSha.slice(0, 12),
+      config: approvedSha.slice(0, 12),
+    });
+    return result;
+  }
+  // When the operator did not set PANEL_ARTIFACT_SHA256, trust the registry
+  // digest so build-level currency checks still work.
+  const expectedSha256 = approvedSha || registeredSha;
+
   // Throttle whole passes; the cron fires every minute and one indexed query
   // per pass is still wasteful when nothing changed.
   const minMinutes = await settingsRepo.getInt(env, "update_check_min_minutes", 30);
@@ -102,6 +121,7 @@ export async function runUpdateCheck(
     const applyBatch = Math.max(1, await settingsRepo.getInt(env, "update_apply_batch", 10));
     const rows = await panelsRepo.listOutdatedAll(env, {
       latestVersion: config.artifactVersion,
+      expectedSha256,
       limit: applyBatch,
     });
     result.outdated = rows.length;
@@ -135,6 +155,7 @@ export async function runUpdateCheck(
   const batch = Math.max(1, await settingsRepo.getInt(env, "update_notify_batch", 10));
   const candidates = await panelsRepo.listOutdatedForNotify(env, {
     latestVersion: config.artifactVersion,
+    expectedSha256,
     renotifyBefore: ts - intervalHours * HOUR,
     limit: batch,
   });

@@ -51,7 +51,7 @@ async function resetNotifySettings(): Promise<void> {
   await testEnv.DB.prepare("DELETE FROM system_settings WHERE key LIKE 'update_%'").run();
 }
 
-/** Inserts an active panel owned by `user` with the given installed version. */
+/** Inserts an active panel owned by `user` with the given installed version/build. */
 async function seedPanel(
   userId: number,
   accountRef: number,
@@ -59,6 +59,7 @@ async function seedPanel(
   options: {
     version?: string | null;
     status?: string;
+    artifactSha256?: string | null;
     notified?: string | null;
     noticeAt?: number | null;
     deleted?: boolean;
@@ -67,8 +68,8 @@ async function seedPanel(
   const now = Date.now();
   const result = await testEnv.DB.prepare(
     `INSERT INTO panels (uid, user_id, account_ref, cloudflare_account_id, worker_name, d1_database_name,
-        status, version, update_notified_version, update_notice_at, deleted_at, updated_at)
-     VALUES (?, ?, ?, 'acc-test', ?, 'db-test', ?, ?, ?, ?, ?, ?)`,
+        status, version, artifact_sha256, update_notified_version, update_notice_at, deleted_at, updated_at)
+     VALUES (?, ?, ?, 'acc-test', ?, 'db-test', ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       `uid-${workerName}`,
@@ -77,6 +78,7 @@ async function seedPanel(
       workerName,
       options.status ?? "active",
       options.version === undefined ? "3.1.12" : options.version,
+      options.artifactSha256 === undefined ? null : options.artifactSha256,
       options.notified ?? null,
       options.noticeAt ?? null,
       options.deleted ? now : null,
@@ -149,7 +151,10 @@ describe("update notifications", () => {
     const blocked = await seedSetup(9105, "upd-blocked");
     await testEnv.DB.prepare("UPDATE users SET is_blocked = 1 WHERE id = ?").bind(blocked.userId).run();
 
-    await seedPanel(owner.userId, owner.accountRef, "bee-current", { version: config.artifactVersion });
+    await seedPanel(owner.userId, owner.accountRef, "bee-current", {
+      version: config.artifactVersion,
+      artifactSha256: config.artifactSha256,
+    });
     await seedPanel(owner.userId, owner.accountRef, "bee-deleted", { deleted: true });
     await seedPanel(owner.userId, owner.accountRef, "bee-updating", { status: "updating" });
     await seedPanel(owner.userId, owner.accountRef, "bee-failed", { status: "failed" });
@@ -205,6 +210,41 @@ describe("update notifications", () => {
       expect(sent.length).toBe(0);
     } finally {
       await testEnv.DB.prepare("UPDATE panel_versions SET is_active = 1 WHERE version = ?").bind(config.artifactVersion).run();
+    }
+  });
+
+  it("notifies for a same-version panel whose build is stale (unpatched bundle)", async () => {
+    // The patched and unpatched 3.1.13 builds share one version string. A
+    // panel installed from the original vendor bundle must still get an update
+    // notice, otherwise it never receives the BEEHIVE patches.
+    const setup = await seedSetup(9110, "upd-stale-build");
+    await seedPanel(setup.userId, setup.accountRef, "bee-stale-build", { version: config.artifactVersion });
+
+    const result = await runUpdateCheck(testEnv, config, telegram);
+    expect(result).toMatchObject({ enabled: true, throttled: false, outdated: 1, notified: 1 });
+    expect(sent.length).toBe(1);
+    expect(sent[0]!.text).toContain("bee-stale-build");
+    expect(sent[0]!.raw).toContain("panel:update_go:");
+  });
+
+  it("never notifies when the approved digest does not match the registry", async () => {
+    // Half-applied release (var bumped, migration not run): the cron must
+    // refuse to push customers toward a target the deploy path cannot verify.
+    const setup = await seedSetup(9111, "upd-mismatch");
+    await seedPanel(setup.userId, setup.accountRef, "bee-mismatch");
+
+    await testEnv.DB.prepare("UPDATE panel_versions SET artifact_sha256 = ? WHERE version = ?")
+      .bind("f".repeat(64), config.artifactVersion)
+      .run();
+    try {
+      const result = await runUpdateCheck(testEnv, config, telegram);
+      expect(result.outdated).toBe(0);
+      expect(result.notified).toBe(0);
+      expect(sent.length).toBe(0);
+    } finally {
+      await testEnv.DB.prepare("UPDATE panel_versions SET artifact_sha256 = ? WHERE version = ?")
+        .bind(config.artifactSha256, config.artifactVersion)
+        .run();
     }
   });
 

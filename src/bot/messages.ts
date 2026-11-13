@@ -184,7 +184,8 @@ export const fa = {
 
   deleteDone: (workerName: string) => `✅ پنل <b>${escapeTelegram(workerName)}</b> و منابع آن حذف شد.`,
 
-  updateNoop: (version: string) => `پنل شما از قبل روی نسخهٔ <code>${escapeTelegram(version)}</code> است.`,
+  updateNoop: (version: string) =>
+    `✅ پنل شما از قبل روی جدیدترین بیلدِ نسخهٔ <code>${escapeTelegram(version)}</code> است و به‌روزرسانی لازم ندارد.`,
   updateStart: (version: string) => `🔄 <b>به‌روزرسانی پنل</b> به نسخهٔ <code>${escapeTelegram(version)}</code> شروع شد.`,
   updateNotAllowed: "پلن فعلی شما امکان به‌روزرسانی ندارد.",
 

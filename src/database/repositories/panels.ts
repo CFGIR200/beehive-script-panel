@@ -336,6 +336,7 @@ export interface OutdatedPanelRow {
  */
 export async function listOutdatedForNotify(env: Env, input: {
   latestVersion: string;
+  expectedSha256: string;
   renotifyBefore: number;
   limit: number;
 }): Promise<OutdatedPanelRow[]> {
@@ -347,16 +348,17 @@ export async function listOutdatedForNotify(env: Env, input: {
       WHERE p.deleted_at IS NULL
         AND p.status = 'active'
         AND p.version IS NOT NULL
-        AND p.version != ?
+        AND (p.version != ?1 OR COALESCE(p.artifact_sha256, '') != ?2)
         AND u.is_blocked = 0
         AND NOT (
-          p.update_notified_version = ?
+          p.update_notified_version = ?3
           AND p.update_notice_at IS NOT NULL
-          AND p.update_notice_at > ?
+          AND p.update_notice_at > ?4
         )
       ORDER BY COALESCE(p.update_notice_at, 0) ASC, p.id ASC
-      LIMIT ?`,
+      LIMIT ?5`,
     input.latestVersion,
+    input.expectedSha256,
     input.latestVersion,
     input.renotifyBefore,
     input.limit,
@@ -388,29 +390,40 @@ export interface BatchOutdatedRow {
   user_telegram_id: number | null;
 }
 
+/**
+ * "Outdated" is BUILD-level, not just version-level: the patched 3.1.13
+ * artifact and the original upstream 3.1.13 share the same version string,
+ * so a panel is current only when BOTH the version and the recorded build
+ * digest (artifact_sha256, written by the deploy pipeline) match the approved
+ * artifact. Panels installed before digest tracking have a NULL/foreign
+ * digest — they are treated as outdated exactly once and converge after the
+ * first update records the approved digest.
+ */
 const OUTDATED_BASE = `
   FROM panels p
   JOIN users u ON u.id = p.user_id
  WHERE p.deleted_at IS NULL
    AND p.status = 'active'
    AND p.version IS NOT NULL
-   AND p.version != ?
+   AND (p.version != ?1 OR COALESCE(p.artifact_sha256, '') != ?2)
    AND u.is_blocked = 0`;
 
 /** Outdated panels owned by one user, oldest install first. */
 export async function listOutdatedForUser(env: Env, input: {
   userId: number;
   latestVersion: string;
+  expectedSha256: string;
   limit?: number;
 }): Promise<BatchOutdatedRow[]> {
   return all<BatchOutdatedRow>(
     env,
     `SELECT p.id, p.user_id, p.worker_name, p.version, u.telegram_id AS user_telegram_id
      ${OUTDATED_BASE}
-       AND p.user_id = ?
+       AND p.user_id = ?3
      ORDER BY p.id ASC
-     LIMIT ?`,
+     LIMIT ?4`,
     input.latestVersion,
+    input.expectedSha256,
     input.userId,
     Math.max(1, input.limit ?? 50),
   );
@@ -419,6 +432,7 @@ export async function listOutdatedForUser(env: Env, input: {
 /** Outdated panels across every tenant (admin bulk update / cron auto-apply). */
 export async function listOutdatedAll(env: Env, input: {
   latestVersion: string;
+  expectedSha256: string;
   limit?: number;
 }): Promise<BatchOutdatedRow[]> {
   return all<BatchOutdatedRow>(
@@ -426,26 +440,33 @@ export async function listOutdatedAll(env: Env, input: {
     `SELECT p.id, p.user_id, p.worker_name, p.version, u.telegram_id AS user_telegram_id
      ${OUTDATED_BASE}
      ORDER BY p.id ASC
-     LIMIT ?`,
+     LIMIT ?3`,
     input.latestVersion,
+    input.expectedSha256,
     Math.max(1, input.limit ?? 200),
   );
 }
 
-/** How many of the user's opened panels are behind the latest version. */
-export async function countOutdatedForUser(env: Env, userId: number, latestVersion: string): Promise<number> {
+/** How many of the user's opened panels are behind the latest version/build. */
+export async function countOutdatedForUser(
+  env: Env,
+  userId: number,
+  latestVersion: string,
+  expectedSha256: string,
+): Promise<number> {
   const value = await scalar(
     env,
-    `SELECT COUNT(*) ${OUTDATED_BASE} AND p.user_id = ?`,
+    `SELECT COUNT(*) ${OUTDATED_BASE} AND p.user_id = ?3`,
     latestVersion,
+    expectedSha256,
     userId,
   );
   return Number(value ?? 0);
 }
 
-/** How many opened panels system-wide are behind the latest version. */
-export async function countOutdatedAll(env: Env, latestVersion: string): Promise<number> {
-  const value = await scalar(env, `SELECT COUNT(*) ${OUTDATED_BASE}`, latestVersion);
+/** How many opened panels system-wide are behind the latest version/build. */
+export async function countOutdatedAll(env: Env, latestVersion: string, expectedSha256: string): Promise<number> {
+  const value = await scalar(env, `SELECT COUNT(*) ${OUTDATED_BASE}`, latestVersion, expectedSha256);
   return Number(value ?? 0);
 }
 

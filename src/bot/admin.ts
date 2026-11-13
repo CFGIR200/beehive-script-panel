@@ -376,7 +376,7 @@ export async function adminToggleSetting(
  */
 export async function adminUpdateAllPrompt(ctx: BotContext): Promise<void> {
   requireAdmin(ctx);
-  const count = await panelsRepo.countOutdatedAll(ctx.env, ctx.config.artifactVersion);
+  const count = await panelsRepo.countOutdatedAll(ctx.env, ctx.config.artifactVersion, ctx.config.artifactSha256);
   if (!count) {
     await ctx.edit(fa.updateAllNone, { reply_markup: adminKeyboard() });
     return;
@@ -394,7 +394,10 @@ export async function adminUpdateAllPrompt(ctx: BotContext): Promise<void> {
 
 export async function adminUpdateAllRun(ctx: BotContext): Promise<void> {
   requireAdmin(ctx);
-  const rows = await panelsRepo.listOutdatedAll(ctx.env, { latestVersion: ctx.config.artifactVersion });
+  const rows = await panelsRepo.listOutdatedAll(ctx.env, {
+    latestVersion: ctx.config.artifactVersion,
+    expectedSha256: ctx.config.artifactSha256,
+  });
   if (!rows.length) {
     await ctx.edit(fa.updateAllNone, { reply_markup: adminKeyboard() });
     return;

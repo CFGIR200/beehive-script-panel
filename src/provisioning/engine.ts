@@ -211,7 +211,7 @@ export async function startUpdate(
   if (!registered || !registered.is_active) {
     throw new AppError("ARTIFACT_MISSING", `نسخهٔ ${version} پنل در دسترس نیست.`);
   }
-  if (!ctx.redeploy && panel.version === version) {
+  if (!ctx.redeploy && panel.version === version && isCurrentBuild(panel, registered)) {
     throw new AppError("CONFLICT", `پنل از قبل روی نسخهٔ ${version} است.`);
   }
 
@@ -227,6 +227,20 @@ export async function startUpdate(
 }
 
 // ---- bulk update -----------------------------------------------------------
+
+/**
+ * A panel is on the approved build only when BOTH the version string and the
+ * recorded build digest match. The patched and unpatched builds of 3.1.13
+ * share one version string — without the digest check, panels still running
+ * the original vendor bundle would be considered current forever and never
+ * receive the BEEHIVE-patched artifact.
+ */
+function isCurrentBuild(panel: { version: string | null; artifact_sha256: string | null }, registered: { version: string; artifact_sha256: string | null }): boolean {
+  if (panel.version !== registered.version) return false;
+  const target = (registered.artifact_sha256 ?? "").toLowerCase();
+  if (!target) return true; // registry without a digest: fall back to version-only
+  return ((panel.artifact_sha256 ?? "").toLowerCase()) === target;
+}
 
 export type UpdateSkipReason = "missing" | "busy" | "current" | "plan" | "concurrency" | "capacity";
 
@@ -295,7 +309,7 @@ export async function startUpdateBatch(
       result.skipped.push({ panelId, workerName: panel?.worker_name ?? "—", reason: "missing" });
       continue;
     }
-    if (panel.version === version) {
+    if (isCurrentBuild(panel, registered)) {
       result.skipped.push({ panelId, workerName: panel.worker_name, reason: "current" });
       continue;
     }
