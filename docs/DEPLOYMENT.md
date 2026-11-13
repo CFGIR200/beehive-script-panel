@@ -51,7 +51,8 @@ BOOTSTRAP_ADMIN_TELEGRAM_ID = "123456789"   # your own Telegram id (send /start 
 ```
 
 `PANEL_ARTIFACT_SHA256` is pre-set to the audited bundle digest
-(`b763b2f8b09d16d13f3b4971c1df069c7c428f0955b28fe78f1009515796eab4`). Change it **only** when you deliberately
+(`7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0` — BEEHIVE-PATCH-1 build, see
+`docs/PATCH-EXTERNAL-CONFIGS.md`). Change it **only** when you deliberately
 ship a different panel build, and update `migrations/0002_seed_plans.sql` in the same commit.
 
 ## 4. Set the five secrets

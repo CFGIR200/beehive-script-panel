@@ -24,7 +24,7 @@ Telegram ──▶ Worker (this repo) ──▶ Cloudflare API (customer account
 | Item | State |
 |---|---|
 | Version | `1.0.0` |
-| Panel bundle | `3.1.13`, SHA-256 `b763b2f8…5796eab4` (audited — `docs/INITIAL_AUDIT.md`) |
+| Panel bundle | `3.1.13` (BEEHIVE-PATCH-1), SHA-256 `7381d693…f8919bc0` (audited — `docs/INITIAL_AUDIT.md`; patch note — `docs/PATCH-EXTERNAL-CONFIGS.md`) |
 | Type check | `tsc --noEmit` clean |
 | Tests | **94 passing** in 9 files (unit, integration, security, e2e) |
 | Bundle | 364.07 KiB, 76.67 KiB gzip (`wrangler 4.86.0 deploy --dry-run`) |

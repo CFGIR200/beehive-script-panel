@@ -1,0 +1,7 @@
+# BEE.HIVE BOT — local dev secrets template (wrangler dev).
+# Copy to .dev.vars (gitignored) and paste real values — never commit the real file.
+# Generation commands are documented in docs/DEPLOYMENT.md.
+TELEGRAM_BOT_TOKEN=123456:PASTE-YOUR-BOT-TOKEN-HERE
+TELEGRAM_WEBHOOK_SECRET=paste-openssl-rand-hex-32-output
+CREDENTIAL_ENCRYPTION_KEY=paste-base64-of-exactly-32-random-bytes
+SESSION_SIGNING_KEY=paste-openssl-rand-hex-32-output

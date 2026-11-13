@@ -4,6 +4,14 @@ Date: 2026-11-01
 Auditor: engineering team acting on the master prompt
 Scope: every artefact supplied in the request, audited before any code was written.
 
+> **2026-11-13 — BEEHIVE-PATCH-1 addendum:** the approved bundle was rebuilt with
+> PATCH-1 (`docs/PATCH-EXTERNAL-CONFIGS.md`): per-user external raw configs are no
+> longer served to inactive/exhausted users. New pinned digest:
+> `7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0`.
+> The obfuscation scheme, loader and §3 findings are unchanged; only the two
+> subscription-serving code paths described in the patch note were modified, and the
+> gzip size dropped from 2,946,628 to 2,785,507 bytes.
+
 ---
 
 ## 0. What was actually delivered to the workspace

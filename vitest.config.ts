@@ -21,7 +21,7 @@ export default defineWorkersConfig(async () => {
               BOOTSTRAP_ADMIN_TELEGRAM_ID: "1",
               PANEL_ARTIFACT_KEY: "panel/beehive-panel-3.1.13.js",
               PANEL_ARTIFACT_VERSION: "3.1.13",
-              PANEL_ARTIFACT_SHA256: "b763b2f8b09d16d13f3b4971c1df069c7c428f0955b28fe78f1009515796eab4",
+              PANEL_ARTIFACT_SHA256: "7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0",
               PANEL_COMPATIBILITY_DATE: "2025-03-10",
               PANEL_CRON: "0 * * * *",
               JOB_SLICE_MS: "6000",
