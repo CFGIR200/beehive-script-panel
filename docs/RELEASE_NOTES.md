@@ -99,3 +99,15 @@ Five defects found by the suite were fixed before release (see `docs/TESTING.md`
 * `workers.dev` verification can take a few seconds to propagate; the verifier retries with backoff.
 * D1 export/import are asynchronous and can be slow on large databases; both are job-based with polling
   budgets and clear failure messages.
+
+## Post-release increments (2026-11-13/14)
+
+* **PATCH-1** — external raw configs stop being served to users whose time/traffic quota is exhausted
+  (bundle-level change; see `docs/PATCH-EXTERNAL-CONFIGS.md`).
+* **PATCH-2** — external-config library: bulk-apply configs to users and an auto-include switch that adds
+  them to every active subscription's user panel (migration `0006`).
+* **UPDNOTIFY-1** — cron-driven Telegram update notices with a one-tap update button, plus the
+  patch-retention pipeline (`scripts/patch-panel-bundle.mjs`, migration `0007`).
+* **UPDALL-1** — "update all opened panels" straight from the bot: user-level and admin-level bulk update
+  (`startUpdateBatch`), optional cron auto-apply (`update_auto_apply`, migration `0008`). Tests: 112 across
+  11 files, `tsc --noEmit` clean. See `docs/UPDATES.md` §4.

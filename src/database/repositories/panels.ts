@@ -375,6 +375,81 @@ export async function markUpdateNotified(env: Env, panelId: number, version: str
 }
 
 // ---------------------------------------------------------------------------
+// Bulk update ("update all opened panels")
+// ---------------------------------------------------------------------------
+
+/** An outdated active panel with everything the batch updater needs. */
+export interface BatchOutdatedRow {
+  id: number;
+  user_id: number;
+  worker_name: string;
+  version: string;
+  /** Owner's Telegram chat id — null only for exotic rows; progress falls back to no push. */
+  user_telegram_id: number | null;
+}
+
+const OUTDATED_BASE = `
+  FROM panels p
+  JOIN users u ON u.id = p.user_id
+ WHERE p.deleted_at IS NULL
+   AND p.status = 'active'
+   AND p.version IS NOT NULL
+   AND p.version != ?
+   AND u.is_blocked = 0`;
+
+/** Outdated panels owned by one user, oldest install first. */
+export async function listOutdatedForUser(env: Env, input: {
+  userId: number;
+  latestVersion: string;
+  limit?: number;
+}): Promise<BatchOutdatedRow[]> {
+  return all<BatchOutdatedRow>(
+    env,
+    `SELECT p.id, p.user_id, p.worker_name, p.version, u.telegram_id AS user_telegram_id
+     ${OUTDATED_BASE}
+       AND p.user_id = ?
+     ORDER BY p.id ASC
+     LIMIT ?`,
+    input.latestVersion,
+    input.userId,
+    Math.max(1, input.limit ?? 50),
+  );
+}
+
+/** Outdated panels across every tenant (admin bulk update / cron auto-apply). */
+export async function listOutdatedAll(env: Env, input: {
+  latestVersion: string;
+  limit?: number;
+}): Promise<BatchOutdatedRow[]> {
+  return all<BatchOutdatedRow>(
+    env,
+    `SELECT p.id, p.user_id, p.worker_name, p.version, u.telegram_id AS user_telegram_id
+     ${OUTDATED_BASE}
+     ORDER BY p.id ASC
+     LIMIT ?`,
+    input.latestVersion,
+    Math.max(1, input.limit ?? 200),
+  );
+}
+
+/** How many of the user's opened panels are behind the latest version. */
+export async function countOutdatedForUser(env: Env, userId: number, latestVersion: string): Promise<number> {
+  const value = await scalar(
+    env,
+    `SELECT COUNT(*) ${OUTDATED_BASE} AND p.user_id = ?`,
+    latestVersion,
+    userId,
+  );
+  return Number(value ?? 0);
+}
+
+/** How many opened panels system-wide are behind the latest version. */
+export async function countOutdatedAll(env: Env, latestVersion: string): Promise<number> {
+  const value = await scalar(env, `SELECT COUNT(*) ${OUTDATED_BASE}`, latestVersion);
+  return Number(value ?? 0);
+}
+
+// ---------------------------------------------------------------------------
 // Versions
 // ---------------------------------------------------------------------------
 

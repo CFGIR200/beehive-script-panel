@@ -27,11 +27,12 @@ import * as subsRepo from "../database/repositories/subscriptions";
 import * as settingsRepo from "../database/repositories/settings";
 import * as auditRepo from "../database/repositories/audit";
 import { broadcast, countRecipients } from "../admin/broadcast";
+import { startUpdateBatch, kickExecutor } from "../provisioning/engine";
 import { clampPagination } from "../database/db";
 import { formatDateFa, toPersianDigits, DAY } from "../utils/time";
 import { AppError, messages } from "../utils/errors";
 import { requirePositiveIntFa, sanitizeSearchTerm } from "../security/validation";
-import { escape } from "./handlers";
+import { escape, summarizeUpdateBatch } from "./handlers";
 
 const PAGE_SIZE = 8;
 
@@ -322,11 +323,13 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
   const installEnabled = settings.install_enabled === "1";
   const maintenance = settings.maintenance_mode === "1";
   const updateNotify = settings.update_notify_enabled !== "0";
+  const updateAuto = settings.update_auto_apply === "1";
   await ctx.edit(
     `⚙️ <b>تنظیمات سیستم</b>\n\n` +
       `• نصب پنل: ${installEnabled ? "فعال" : "غیرفعال"}\n` +
       `• حالت تعمیرات: ${maintenance ? "فعال" : "غیرفعال"}\n` +
       `• اعلان به‌روزرسانی پنل: ${updateNotify ? "فعال" : "غیرفعال"}\n` +
+      `• به‌روزرسانی خودکار همهٔ پنل‌ها: ${updateAuto ? "فعال" : "غیرفعال"}\n` +
       `• پلن پیش‌فرض: <code>${escape(settings.default_plan ?? "free")}</code>\n` +
       `• هم‌زمانی سراسری: ${toPersianDigits(Number(settings.max_global_concurrency ?? 6))}`,
     {
@@ -336,6 +339,7 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
           [{ text: installEnabled ? "⏸ غیرفعال‌کردن نصب" : "▶️ فعال‌کردن نصب", callback_data: "adm:toggle_install" }],
           [ { text: maintenance ? "🟢 خروج از تعمیرات" : "🛑 حالت تعمیرات", callback_data: "adm:toggle_maintenance" }],
           [{ text: updateNotify ? "🔔 خاموش‌کردن اعلان به‌روزرسانی" : "🔔 روشن‌کردن اعلان به‌روزرسانی", callback_data: "adm:toggle_update_notify" }],
+          [{ text: updateAuto ? "⏹ خاموش‌کردن به‌روزرسانی خودکار" : "🔁 روشن‌کردن به‌روزرسانی خودکار", callback_data: "adm:toggle_update_auto" }],
           [{ text: "🔙 پنل مدیریت", callback_data: "adm:home" }],
         ],
       },
@@ -345,7 +349,7 @@ export async function adminSettings(ctx: BotContext): Promise<void> {
 
 export async function adminToggleSetting(
   ctx: BotContext,
-  key: "install_enabled" | "maintenance_mode" | "update_notify_enabled",
+  key: "install_enabled" | "maintenance_mode" | "update_notify_enabled" | "update_auto_apply",
 ): Promise<void> {
   requireAdmin(ctx);
   const current = await settingsRepo.get(ctx.env, key, "0");
@@ -362,6 +366,54 @@ export async function adminToggleSetting(
   });
   await ctx.answer("ثبت شد");
   await adminSettings(ctx);
+}
+
+/**
+ * Admin bulk update — one tap queues an update job for every outdated opened
+ * panel across all tenants. Per-job progress goes to each panel owner's own
+ * Telegram chat; the admin gets a summary here. Data safety is identical to
+ * the single-panel flow (Worker script only; D1 and patches survive).
+ */
+export async function adminUpdateAllPrompt(ctx: BotContext): Promise<void> {
+  requireAdmin(ctx);
+  const count = await panelsRepo.countOutdatedAll(ctx.env, ctx.config.artifactVersion);
+  if (!count) {
+    await ctx.edit(fa.updateAllNone, { reply_markup: adminKeyboard() });
+    return;
+  }
+  await ctx.edit(fa.adminUpdateAllConfirm({ count, to: ctx.config.artifactVersion }), {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `✅ به‌روزرسانی همه (${count} پنل)`, callback_data: "adm:update_all_go" }],
+        [{ text: "🔙 پنل مدیریت", callback_data: "adm:home" }],
+      ],
+    },
+  });
+}
+
+export async function adminUpdateAllRun(ctx: BotContext): Promise<void> {
+  requireAdmin(ctx);
+  const rows = await panelsRepo.listOutdatedAll(ctx.env, { latestVersion: ctx.config.artifactVersion });
+  if (!rows.length) {
+    await ctx.edit(fa.updateAllNone, { reply_markup: adminKeyboard() });
+    return;
+  }
+  try {
+    const batch = await startUpdateBatch(ctx.env, ctx.config, {
+      panelIds: rows.map((row) => row.id),
+      actorType: "telegram_user",
+      actorId: ctx.identity.user.id,
+      telegramChatId: null,
+    });
+    await ctx.edit(fa.adminUpdateAllSummary(summarizeUpdateBatch(batch, ctx.config.artifactVersion)), {
+      parse_mode: "HTML",
+      reply_markup: adminKeyboard(),
+    });
+    if (batch.queued.length > 0) kickExecutor(ctx.env, ctx.config);
+  } catch (error) {
+    await ctx.edit(errorText(error), { reply_markup: adminKeyboard() });
+  }
 }
 
 export async function adminInfra(ctx: BotContext): Promise<void> {

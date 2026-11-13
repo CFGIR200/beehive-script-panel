@@ -188,6 +188,39 @@ export const fa = {
   updateStart: (version: string) => `🔄 <b>به‌روزرسانی پنل</b> به نسخهٔ <code>${escapeTelegram(version)}</code> شروع شد.`,
   updateNotAllowed: "پلن فعلی شما امکان به‌روزرسانی ندارد.",
 
+  // Bulk update — "update all opened panels" straight from the bot (UPDALL-1).
+  updateAllConfirm: (input: { count: number; to: string }) =>
+    `🔄 <b>به‌روزرسانی همهٔ پنل‌ها</b>\n\n` +
+    `${toPersianDigits(input.count)} پنل شما روی نسخهٔ قدیمی‌تر هستند و می‌توانند به نسخهٔ ` +
+    `<code>${escapeTelegram(input.to)}</code> ارتقا یابند.\n\n` +
+    `فقط اسکریپت Worker جایگزین می‌شود؛ پایگاه دادهٔ هر پنل (کاربران، تنظیمات و کتابخانهٔ ` +
+    `کانفیگ‌های اکسترنال) و تغییرات سفارشی نسخه حفظ می‌شود.\n\nادامه می‌دهید؟`,
+  updateAllNone: "✅ همهٔ پنل‌های شما روی آخرین نسخهٔ تأییدشده هستند.",
+  updateAllSummary: (input: { queued: number; busy: number; plan: number; capacity: number; other: number; to: string }) => {
+    const lines = [`🚀 به‌روزرسانی ${toPersianDigits(input.queued)} پنل به نسخهٔ <code>${escapeTelegram(input.to)}</code> آغاز شد.`];
+    if (input.busy > 0) lines.push(`⏳ ${toPersianDigits(input.busy)} پنل در حال انجام کار دیگر بودند — بعداً دوباره تلاش کنید.`);
+    if (input.plan > 0) lines.push(`💳 ${toPersianDigits(input.plan)} پنل به‌دلیل محدودیت پلن رد شدند.`);
+    if (input.capacity > 0) lines.push(`🌐 ظرفیت سرور پر بود؛ ${toPersianDigits(input.capacity)} پنل در صف بعدی به‌روزرسانی می‌شوند.`);
+    if (input.other > 0) lines.push(`• ${toPersianDigits(input.other)} پنل به‌دلیل وضعیت خاص رد شدند.`);
+    lines.push("پیشرفت هر پنل به‌صورت پیام جداگانه اعلام می‌شود.");
+    return lines.join("\n");
+  },
+
+  // Admin: same bulk update across every tenant's opened panels.
+  adminUpdateAllConfirm: (input: { count: number; to: string }) =>
+    `🔄 <b>به‌روزرسانی همهٔ پنل‌های باز سیستم</b>\n\n` +
+    `${toPersianDigits(input.count)} پنل فعال در کل سیستم روی نسخهٔ قدیمی‌تر هستند.\n` +
+    `نسخهٔ مقصد: <code>${escapeTelegram(input.to)}</code>\n\n` +
+    `برای هر صاحب پنل، پیام پیشرفت در گفت‌وگوی خودش ارسال می‌شود و داده‌ها دست‌نخورده می‌مانند.\n\nادامه می‌دهید؟`,
+  adminUpdateAllSummary: (input: { queued: number; busy: number; plan: number; capacity: number; other: number; to: string }) => {
+    const lines = [`🚀 به‌روزرسانی ${toPersianDigits(input.queued)} پنل به نسخهٔ <code>${escapeTelegram(input.to)}</code> در صف قرار گرفت.`];
+    if (input.busy > 0) lines.push(`⏳ ${toPersianDigits(input.busy)} پنل مشغول بودند.`);
+    if (input.plan > 0) lines.push(`💳 ${toPersianDigits(input.plan)} پنل به‌دلیل پلن صاحبشان رد شدند.`);
+    if (input.capacity > 0) lines.push(`🌐 ظرفیت سرور پر بود؛ ${toPersianDigits(input.capacity)} پنل در اجر بعدی پردازش می‌شوند.`);
+    if (input.other > 0) lines.push(`• ${toPersianDigits(input.other)} پنل به‌دلیل وضعیت خاص رد شدند.`);
+    return lines.join("\n");
+  },
+
   // Cron-driven notice: a newer approved panel version is available. The
   // one-tap button routes into panel:update_go, so the update runs through the
   // exact same job pipeline as the manual flow.

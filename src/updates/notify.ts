@@ -1,10 +1,14 @@
 /**
- * Panel update notifications.
+ * Panel update notifications and auto-apply.
  *
  * The cron trigger compares every active panel's installed version with the
  * approved latest version (PANEL_ARTIFACT_VERSION, cross-checked against the
- * `panel_versions` registry) and sends the owner a Telegram notice with a
- * one-tap "update now" button wired to the existing `panel:update_go` flow.
+ * `panel_versions` registry) and either:
+ *   • sends the owner a Telegram notice with a one-tap "update now" button
+ *     wired to the existing `panel:update_go` flow (default), or
+ *   • with the `update_auto_apply` setting on, queues an update job for every
+ *     outdated opened panel directly (UPDALL-1) — no tap needed, progress is
+ *     pushed to each owner's chat by the job pipeline itself.
  *
  * Notices are remembered per panel (`update_notified_version` +
  * `update_notice_at`): a customer is pinged exactly once per new version, then
@@ -19,6 +23,7 @@ import type { Env, PublicConfig } from "../config/env";
 import type { TelegramClient } from "../bot/telegram";
 import { fa } from "../bot/messages";
 import { cb } from "../bot/keyboards";
+import { startUpdateBatch } from "../provisioning/engine";
 import * as panelsRepo from "../database/repositories/panels";
 import * as settingsRepo from "../database/repositories/settings";
 import * as auditRepo from "../database/repositories/audit";
@@ -38,6 +43,8 @@ export interface UpdateCheckResult {
   outdated: number;
   notified: number;
   failed: number;
+  /** Panels auto-updated this pass (update_auto_apply mode, UPDALL-1). */
+  applied: number;
 }
 
 /** Runs one update-notification pass. Never throws — callers log the result. */
@@ -54,6 +61,7 @@ export async function runUpdateCheck(
     outdated: 0,
     notified: 0,
     failed: 0,
+    applied: 0,
   };
 
   const enabled = await settingsRepo.getBool(env, "update_notify_enabled", true);
@@ -83,6 +91,45 @@ export async function runUpdateCheck(
     return result;
   }
   await settingsRepo.set(env, "update_check_last_at", String(ts));
+
+  // Auto-apply mode (update_auto_apply): the operator has pre-approved the
+  // latest artifact for silent rollout. Queue an update job for every outdated
+  // opened panel instead of notifying — the job pipeline pushes progress to
+  // each owner's chat, so no separate notice is sent. Capacity-limited panels
+  // stay outdated and are picked up by the next throttled pass.
+  const autoApply = await settingsRepo.getBool(env, "update_auto_apply", false);
+  if (autoApply) {
+    const applyBatch = Math.max(1, await settingsRepo.getInt(env, "update_apply_batch", 10));
+    const rows = await panelsRepo.listOutdatedAll(env, {
+      latestVersion: config.artifactVersion,
+      limit: applyBatch,
+    });
+    result.outdated = rows.length;
+    if (rows.length > 0) {
+      try {
+        const batch = await startUpdateBatch(env, config, {
+          panelIds: rows.map((row) => row.id),
+          actorType: "system",
+          actorId: null,
+          telegramChatId: null,
+        });
+        result.applied = batch.queued.length;
+        result.failed = batch.skipped.length;
+        await auditRepo.record(env, {
+          actorType: "system",
+          actorId: null,
+          action: "updates.autoapply.queued",
+          targetType: "panel_versions",
+          targetId: config.artifactVersion,
+          detail: { applied: result.applied, skipped: batch.skipped.length, capacityReached: batch.capacityReached },
+        });
+      } catch (error) {
+        logger.warn("auto-apply batch failed", { error });
+        result.failed = rows.length;
+      }
+    }
+    return result;
+  }
 
   const intervalHours = Math.max(1, await settingsRepo.getInt(env, "update_notify_interval_hours", 24));
   const batch = Math.max(1, await settingsRepo.getInt(env, "update_notify_batch", 10));

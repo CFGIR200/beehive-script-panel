@@ -83,12 +83,13 @@ export default {
       }
 
       // 3.5. Panel update notifications: tell owners of outdated panels that a
-      // newer approved version exists, with a one-tap update button. Throttled
-      // and deduped internally (see src/updates/notify.ts).
+      // newer approved version exists, with a one-tap update button — or, with
+      // update_auto_apply enabled, queue the update jobs directly (UPDALL-1).
+      // Throttled and deduped internally (see src/updates/notify.ts).
       try {
         const telegram = new TelegramClient(env.TELEGRAM_BOT_TOKEN, { traceId: "cron_update_notify" });
         const result = await runUpdateCheck(env, config, telegram);
-        if (result.notified > 0 || result.failed > 0) {
+        if (result.notified > 0 || result.failed > 0 || result.applied > 0) {
           logger.info("update notifications sent", { ...result });
         }
       } catch (error) {

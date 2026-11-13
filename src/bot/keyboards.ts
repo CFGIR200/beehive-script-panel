@@ -94,11 +94,15 @@ export const accountDetailKeyboard = (accountRef: number): InlineKeyboardMarkup 
 
 export const panelsKeyboard = (
   panels: Array<{ id: number; workerName: string; status: string }>,
+  opts: { outdated: number } = { outdated: 0 },
 ): InlineKeyboardMarkup =>
   keyboard([
     ...panels.map((panel) => [
       button(`${statusEmoji(panel.status)} ${truncate(panel.workerName, 30)}`, cb("panel", "view", panel.id)),
     ]),
+    ...(opts.outdated > 0
+      ? [[button(`🔄 به‌روزرسانی همه (${opts.outdated} پنل)`, cb("panel", "update_all"))]]
+      : []),
     [button("🚀 نصب پنل جدید", cb("panel", "new"))],
     [button("🏠 منوی اصلی", cb("menu", "main"))],
   ]);
@@ -162,6 +166,7 @@ export const adminKeyboard = (): InlineKeyboardMarkup =>
     [button("📊 داشبورد", cb("adm", "home")), button("👥 کاربران", cb("adm", "users"))],
     [button("🗂 عملیات", cb("adm", "jobs")), button("💳 پلن‌ها", cb("adm", "plans"))],
     [button("⚙️ تنظیمات", cb("adm", "settings")), button("🩺 زیرساخت", cb("adm", "infra"))],
+    [button("🔄 به‌روزرسانی همهٔ پنل‌ها", cb("adm", "update_all"))],
     [button("📣 پیام همگانی", cb("adm", "broadcast"))],
     [button("🏠 منوی کاربری", cb("menu", "main"))],
   ]);

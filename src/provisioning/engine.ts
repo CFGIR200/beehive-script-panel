@@ -17,10 +17,11 @@ import type { Panel } from "../database/repositories/panels";
 import * as accountsRepo from "../database/repositories/accounts";
 import * as auditRepo from "../database/repositories/audit";
 import * as settingsRepo from "../database/repositories/settings";
+import * as usersRepo from "../database/repositories/users";
 import { stepNames } from "./planner";
 import type { InstallPayload } from "./steps";
 import { drain } from "./executor";
-import { assertCanBackup, assertCanInstall, assertCanUpdate } from "../subscriptions/limits";
+import { assertCanBackup, assertCanInstall, assertCanUpdate, entitlementsFor, type Entitlements } from "../subscriptions/limits";
 import { AppError, toAppError } from "../utils/errors";
 import { createLogger } from "../utils/logger";
 import { databaseName as makeDatabaseName, panelUid, traceId, uuid, workerName as makeWorkerName, recoveryKey } from "../utils/ids";
@@ -146,6 +147,53 @@ export async function startInstall(
   return { job, panel, workerName };
 }
 
+/** Shared tail of startUpdate/startUpdateBatch: record the job, flip status, audit. */
+async function queueUpdateJob(
+  env: Env,
+  panel: Panel,
+  opts: {
+    kind: "update" | "redeploy";
+    version: string;
+    actorType: "telegram_user" | "system";
+    actorId: number | null;
+    telegramChatId: number | null;
+  },
+): Promise<Job> {
+  const job = await jobsRepo.create(env, {
+    id: uuid(),
+    userId: panel.user_id,
+    panelId: panel.id,
+    accountRef: panel.account_ref,
+    kind: opts.kind,
+    payload: {
+      workerName: panel.worker_name,
+      databaseName: panel.d1_database_name,
+      version: opts.version,
+      accountRef: panel.account_ref,
+      cloudflareAccountId: panel.cloudflare_account_id,
+      d1DatabaseId: panel.d1_database_id ?? undefined,
+      subdomain: undefined,
+      previousVersion: panel.version ?? undefined,
+      previousSha: panel.artifact_sha256 ?? undefined,
+    } satisfies InstallPayload,
+    traceId: traceId(),
+    telegramChatId: opts.telegramChatId,
+    steps: stepNames(opts.kind),
+  });
+
+  await panelsRepo.updateStatus(env, panel.id, "updating");
+  await auditRepo.record(env, {
+    actorType: opts.actorType,
+    actorId: opts.actorId,
+    action: opts.kind === "redeploy" ? "panel.redeploy.started" : "panel.update.started",
+    targetType: "panel",
+    targetId: panel.uid,
+    traceId: job.trace_id,
+    detail: { from: panel.version, to: opts.version },
+  });
+  return job;
+}
+
 export async function startUpdate(
   env: Env,
   config: PublicConfig,
@@ -167,41 +215,163 @@ export async function startUpdate(
     throw new AppError("CONFLICT", `پنل از قبل روی نسخهٔ ${version} است.`);
   }
 
-  const kind: JobKind = ctx.redeploy ? "redeploy" : "update";
-  const job = await jobsRepo.create(env, {
-    id: uuid(),
-    userId: ctx.userId,
-    panelId: panel.id,
-    accountRef: panel.account_ref,
-    kind,
-    payload: {
-      workerName: panel.worker_name,
-      databaseName: panel.d1_database_name,
-      version,
-      accountRef: panel.account_ref,
-      cloudflareAccountId: panel.cloudflare_account_id,
-      d1DatabaseId: panel.d1_database_id ?? undefined,
-      subdomain: undefined,
-      previousVersion: panel.version ?? undefined,
-      previousSha: panel.artifact_sha256 ?? undefined,
-    } satisfies InstallPayload,
-    traceId: trace(ctx),
-    telegramChatId: ctx.telegramChatId,
-    steps: stepNames(kind),
-  });
-
-  await panelsRepo.updateStatus(env, panel.id, "updating");
-  await auditRepo.record(env, {
+  const job = await queueUpdateJob(env, panel, {
+    kind: ctx.redeploy ? "redeploy" : "update",
+    version,
     actorType: "telegram_user",
     actorId: ctx.userId,
-    action: ctx.redeploy ? "panel.redeploy.started" : "panel.update.started",
-    targetType: "panel",
-    targetId: panel.uid,
-    traceId: job.trace_id,
-    detail: { from: panel.version, to: version },
+    telegramChatId: ctx.telegramChatId,
   });
 
   return { job, panel };
+}
+
+// ---- bulk update -----------------------------------------------------------
+
+export type UpdateSkipReason = "missing" | "busy" | "current" | "plan" | "concurrency" | "capacity";
+
+export interface UpdateBatchResult {
+  queued: Array<{ panelId: number; workerName: string; jobId: string }>;
+  skipped: Array<{ panelId: number; workerName: string; reason: UpdateSkipReason }>;
+  /** true when the global concurrency cap stopped the batch early. */
+  capacityReached: boolean;
+}
+
+/**
+ * Queues an update job for every given panel that can accept one, without
+ * throwing on individual panels — a bulk "update all opened panels" must not
+ * die because one panel is busy. Skips are reported with reasons instead:
+ *
+ *   missing      — panel gone, deleted, or not in a state that accepts updates
+ *   busy         — another job is already running for that panel
+ *   current      — panel already runs the approved latest version
+ *   plan         — owner's plan disallows updates
+ *   concurrency  — owner already has their maximum concurrent jobs running
+ *   capacity     — global concurrency cap reached; the caller can retry later
+ *
+ * Data safety matches the single-panel flow exactly: only the Worker script is
+ * replaced, the customer D1 database and the baked-in BEEHIVE patches survive.
+ */
+export async function startUpdateBatch(
+  env: Env,
+  config: PublicConfig,
+  input: {
+    panelIds: number[];
+    actorType: "telegram_user" | "system";
+    actorId: number | null;
+    /** Chat that receives per-job progress; null → each panel owner's own chat. */
+    telegramChatId?: number | null;
+  },
+): Promise<UpdateBatchResult> {
+  const logger = createLogger({ scope: "engine.updateBatch", traceId: traceId() });
+  const result: UpdateBatchResult = { queued: [], skipped: [], capacityReached: false };
+
+  const version = config.artifactVersion;
+  const registered = await panelsRepo.findVersion(env, version);
+  if (!registered || !registered.is_active) {
+    throw new AppError("ARTIFACT_MISSING", `نسخهٔ ${version} پنل در دسترس نیست.`);
+  }
+
+  const [active, limit] = await Promise.all([
+    jobsRepo.activeJobCount(env),
+    settingsRepo.getInt(env, "max_global_concurrency", 6),
+  ]);
+  let slots = Math.max(0, limit - active);
+
+  const entitlementsByOwner = new Map<number, Entitlements>();
+  const ownerChatByOwner = new Map<number, number | null>();
+  const queuedPerOwner = new Map<number, number>();
+
+  for (const panelId of input.panelIds) {
+    if (slots <= 0) {
+      result.capacityReached = true;
+      const panel = await panelsRepo.findById(env, panelId);
+      result.skipped.push({ panelId, workerName: panel?.worker_name ?? "—", reason: "capacity" });
+      continue;
+    }
+
+    const panel = await panelsRepo.findById(env, panelId);
+    if (!panel || panel.status !== "active") {
+      result.skipped.push({ panelId, workerName: panel?.worker_name ?? "—", reason: "missing" });
+      continue;
+    }
+    if (panel.version === version) {
+      result.skipped.push({ panelId, workerName: panel.worker_name, reason: "current" });
+      continue;
+    }
+    if (await jobsRepo.activeJobForPanel(env, panel.id)) {
+      result.skipped.push({ panelId, workerName: panel.worker_name, reason: "busy" });
+      continue;
+    }
+
+    let entitlements = entitlementsByOwner.get(panel.user_id);
+    if (!entitlements) {
+      try {
+        entitlements = await assertCanUpdate(env, panel.user_id);
+      } catch {
+        // Plan/concurrency limit hit: load entitlements anyway so the skip
+        // reason (plan vs concurrency) can be reported precisely.
+        entitlements = await entitlementsFor(env, panel.user_id);
+      }
+      entitlementsByOwner.set(panel.user_id, entitlements);
+    }
+    if (!entitlements.canUpdate) {
+      result.skipped.push({ panelId, workerName: panel.worker_name, reason: "plan" });
+      continue;
+    }
+    const alreadyQueued = queuedPerOwner.get(panel.user_id) ?? 0;
+    if (entitlements.activeJobs + alreadyQueued >= entitlements.maxConcurrentJobs) {
+      result.skipped.push({ panelId, workerName: panel.worker_name, reason: "concurrency" });
+      continue;
+    }
+
+    let ownerChat = input.telegramChatId;
+    if (ownerChat == null) {
+      if (!ownerChatByOwner.has(panel.user_id)) {
+        const owner = await usersRepo.findById(env, panel.user_id);
+        ownerChatByOwner.set(panel.user_id, owner?.telegram_id ?? null);
+      }
+      ownerChat = ownerChatByOwner.get(panel.user_id) ?? null;
+    }
+
+    try {
+      const job = await queueUpdateJob(env, panel, {
+        kind: "update",
+        version,
+        actorType: input.actorType,
+        actorId: input.actorId,
+        telegramChatId: ownerChat,
+      });
+      slots -= 1;
+      queuedPerOwner.set(panel.user_id, alreadyQueued + 1);
+      result.queued.push({ panelId: panel.id, workerName: panel.worker_name, jobId: job.id });
+    } catch (error) {
+      // Race with another enqueue (global capacity, idle check): report, keep going.
+      logger.warn("batch enqueue failed", { panelId: panel.id, error });
+      result.skipped.push({ panelId: panel.id, workerName: panel.worker_name, reason: "capacity" });
+    }
+  }
+
+  if (result.queued.length > 0) {
+    await auditRepo.record(env, {
+      actorType: input.actorType,
+      actorId: input.actorId,
+      action: "panel.update.batch_started",
+      targetType: "panel_versions",
+      targetId: version,
+      detail: {
+        queued: result.queued.length,
+        skipped: result.skipped.reduce<Record<string, number>>((acc, item) => {
+          acc[item.reason] = (acc[item.reason] ?? 0) + 1;
+          return acc;
+        }, {}),
+        capacityReached: result.capacityReached,
+      },
+    });
+  }
+
+  logger.info("update batch finished", { queued: result.queued.length, skipped: result.skipped.length });
+  return result;
 }
 
 export async function startDelete(

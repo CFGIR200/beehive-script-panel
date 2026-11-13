@@ -242,6 +242,12 @@ async function handleCallback(ctx: Awaited<ReturnType<typeof createContext>>): P
     case "panel:update_go":
       await handlers.launchPanelJob(ctx, numeric(0), "update");
       return;
+    case "panel:update_all":
+      await handlers.confirmUpdateAll(ctx);
+      return;
+    case "panel:update_all_go":
+      await handlers.launchUpdateAll(ctx);
+      return;
     case "panel:redeploy":
       await handlers.launchPanelJob(ctx, numeric(0), "redeploy");
       return;
@@ -348,6 +354,15 @@ async function handleAdminCallback(
       return;
     case "toggle_update_notify":
       await admin.adminToggleSetting(ctx, "update_notify_enabled");
+      return;
+    case "toggle_update_auto":
+      await admin.adminToggleSetting(ctx, "update_auto_apply");
+      return;
+    case "update_all":
+      await admin.adminUpdateAllPrompt(ctx);
+      return;
+    case "update_all_go":
+      await admin.adminUpdateAllRun(ctx);
       return;
     case "infra":
       await admin.adminInfra(ctx);

@@ -36,7 +36,7 @@ import * as usersRepo from "../database/repositories/users";
 import * as manager from "../panels/manager";
 import * as health from "../panels/health";
 import { entitlementsFor, describeLimits } from "../subscriptions/limits";
-import { cancelJob, startBackup, startDelete, startInstall, startRestore, startUpdate, kickExecutor } from "../provisioning/engine";
+import { cancelJob, startBackup, startDelete, startInstall, startRestore, startUpdate, startUpdateBatch, kickExecutor, type UpdateBatchResult } from "../provisioning/engine";
 import { reportJobProgress, jobTitle } from "../provisioning/progress";
 import { CONNECT_LINK_TTL_MS, PRODUCT_VERSION } from "../config/constants";
 import { sha256Hex, randomToken } from "../utils/ids";
@@ -289,10 +289,78 @@ export async function showPanels(ctx: BotContext): Promise<void> {
     await ctx.edit(fa.panelsEmpty, { reply_markup: mainMenuKeyboard(ctx.identity.isStaff) });
     return;
   }
+  const outdated = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion);
   await ctx.edit(fa.panelsList(views.length), {
     parse_mode: "HTML",
-    reply_markup: panelsKeyboard(views.map((view) => ({ id: view.id, workerName: view.workerName, status: view.status }))),
+    reply_markup: panelsKeyboard(
+      views.map((view) => ({ id: view.id, workerName: view.workerName, status: view.status })),
+      { outdated },
+    ),
   });
+}
+
+/** Shared shape between the user-facing and admin bulk-update summaries. */
+export function summarizeUpdateBatch(batch: UpdateBatchResult, to: string): {
+  queued: number; busy: number; plan: number; capacity: number; other: number; to: string;
+} {
+  const by = (reason: string) => batch.skipped.filter((item) => item.reason === reason).length;
+  return {
+    queued: batch.queued.length,
+    busy: by("busy"),
+    plan: by("plan"),
+    capacity: by("capacity"),
+    other: batch.skipped.filter((item) => !"busy|plan|capacity".split("|").includes(item.reason)).length,
+    to,
+  };
+}
+
+/**
+ * "Update all opened panels" — confirmation for the user scope. One tap queues
+ * an update job for every outdated panel the user owns; each job replaces only
+ * the Worker script, so customer data and the baked-in patches always survive.
+ */
+export async function confirmUpdateAll(ctx: BotContext): Promise<void> {
+  const count = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion);
+  if (!count) {
+    await ctx.edit(fa.updateAllNone, { reply_markup: backToMainKeyboard() });
+    return;
+  }
+  await ctx.edit(fa.updateAllConfirm({ count, to: ctx.config.artifactVersion }), {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `✅ به‌روزرسانی همه (${count} پنل)`, callback_data: "panel:update_all_go" }],
+        [{ text: "🔙 بازگشت", callback_data: "panel:list" }],
+      ],
+    },
+  });
+}
+
+export async function launchUpdateAll(ctx: BotContext): Promise<void> {
+  const rows = await panelsRepo.listOutdatedForUser(ctx.env, {
+    userId: ctx.identity.user.id,
+    latestVersion: ctx.config.artifactVersion,
+  });
+  if (!rows.length) {
+    await ctx.edit(fa.updateAllNone, { reply_markup: backToMainKeyboard() });
+    return;
+  }
+  try {
+    const batch = await startUpdateBatch(ctx.env, ctx.config, {
+      panelIds: rows.map((row) => row.id),
+      actorType: "telegram_user",
+      actorId: ctx.identity.user.id,
+      telegramChatId: ctx.chatId,
+    });
+    await ctx.edit(fa.updateAllSummary(summarizeUpdateBatch(batch, ctx.config.artifactVersion)), {
+      parse_mode: "HTML",
+      reply_markup: backToMainKeyboard(),
+    });
+    if (batch.queued.length > 0) kickExecutor(ctx.env, ctx.config);
+  } catch (error) {
+    ctx.logger.warn("update-all launch failed", { error });
+    await ctx.edit(errorText(error), { reply_markup: backToMainKeyboard() });
+  }
 }
 
 export async function showPanelDetail(ctx: BotContext, panelId: number): Promise<void> {
