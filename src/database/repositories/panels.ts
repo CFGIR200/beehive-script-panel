@@ -63,6 +63,8 @@ export interface PanelVersion {
   artifact_sha256: string;
   compatibility_date: string;
   notes: string | null;
+  /** Persian release changelog (one change per line) shown by the bot on updates. */
+  changelog_fa: string | null;
   is_active: number;
   created_at: number;
 }
@@ -488,23 +490,26 @@ export async function registerVersion(env: Env, input: {
   artifactSha256: string;
   compatibilityDate: string;
   notes: string | null;
+  changelogFa?: string | null;
   isActive: boolean;
 }): Promise<void> {
   await run(
     env,
-    `INSERT INTO panel_versions (version, artifact_key, artifact_sha256, compatibility_date, notes, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO panel_versions (version, artifact_key, artifact_sha256, compatibility_date, notes, changelog_fa, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (version) DO UPDATE SET
        artifact_key = excluded.artifact_key,
        artifact_sha256 = excluded.artifact_sha256,
        compatibility_date = excluded.compatibility_date,
        notes = excluded.notes,
+       changelog_fa = excluded.changelog_fa,
        is_active = excluded.is_active`,
     input.version,
     input.artifactKey,
     input.artifactSha256,
     input.compatibilityDate,
     input.notes,
+    input.changelogFa ?? null,
     input.isActive ? 1 : 0,
     now(),
   );

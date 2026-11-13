@@ -70,15 +70,18 @@ export async function seedAccount(userId: number, token = TEST_TOKEN): Promise<a
 
 /**
  * Registers the test bundle in R2 and aligns the panel_versions hash so the
- * installer's integrity check passes. A separate test flips the hash to prove a
- * mismatch is rejected.
+ * installer's integrity check passes. Defaults to the version the Worker
+ * config targets (PANEL_ARTIFACT_VERSION) so the harness follows releases
+ * without further edits. A separate test flips the hash to prove a mismatch
+ * is rejected.
  */
-export async function registerTestArtifact(version = "3.1.13"): Promise<string> {
+export async function registerTestArtifact(version?: string): Promise<string> {
+  const target = version || (env as unknown as Env).PANEL_ARTIFACT_VERSION || "3.1.14";
   const digest = await sha256Hex(TEST_PANEL_SOURCE);
   await env.DB.prepare("UPDATE panel_versions SET artifact_sha256 = ?, artifact_key = ? WHERE version = ?")
-    .bind(digest, `panel/test-${version}.js`, version)
+    .bind(digest, `panel/test-${target}.js`, target)
     .run();
-  await env.ARTIFACTS!.put(`panel/test-${version}.js`, TEST_PANEL_SOURCE);
+  await env.ARTIFACTS!.put(`panel/test-${target}.js`, TEST_PANEL_SOURCE);
   return digest;
 }
 

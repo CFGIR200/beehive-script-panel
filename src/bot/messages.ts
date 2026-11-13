@@ -8,6 +8,37 @@ import { PRODUCT_NAME, PRODUCT_VERSION } from "../config/constants";
 import { escapeTelegram } from "../utils/http";
 import { toPersianDigits } from "../utils/time";
 
+/**
+ * Renders the Persian release changelog stored on panel_versions.changelog_fa
+ * (UPDRELEASE-1: one change per line) as a bullet block for Telegram HTML
+ * messages. Returns "" when the row carries no changelog, so callers can
+ * append it unconditionally.
+ *
+ * Heading variants:
+ *   • from given and different → "تغییرات نسخهٔ X نسبت به نسخهٔ Y"
+ *   • from given and equal (stale-build update) → "تغییرات این بیلد نسبت به بیلد نصب‌شدهٔ فعلی"
+ *   • from omitted (mixed fleet, completion) → "تغییرات نسخهٔ X"
+ */
+export function changelogBlock(input: {
+  to: string;
+  from?: string | null;
+  changelogFa?: string | null;
+}): string {
+  const lines = String(input.changelogFa ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (!lines.length) return "";
+  const to = escapeTelegram(input.to);
+  const heading =
+    input.from && input.from !== input.to
+      ? `تغییرات نسخهٔ <code>${to}</code> نسبت به نسخهٔ <code>${escapeTelegram(input.from)}</code>`
+      : input.from
+        ? "تغییرات این بیلد نسبت به بیلد نصب‌شدهٔ فعلی"
+        : `تغییرات نسخهٔ <code>${to}</code>`;
+  return `\n\n📋 <b>${heading}:</b>\n${lines.map((line) => `• ${escapeTelegram(line)}`).join("\n")}`;
+}
+
 export const fa = {
   welcome: (firstName: string) =>
     `سلام ${escapeTelegram(firstName)}! 👋\n\n` +
@@ -190,12 +221,16 @@ export const fa = {
   updateNotAllowed: "پلن فعلی شما امکان به‌روزرسانی ندارد.",
 
   // Bulk update — "update all opened panels" straight from the bot (UPDALL-1).
-  updateAllConfirm: (input: { count: number; to: string }) =>
+  // UPDRELEASE-1: the release changelog (changelog_fa of the target version) is
+  // rendered into the confirmation so owners approve the update knowing what changed.
+  updateAllConfirm: (input: { count: number; to: string; changelog?: string }) =>
     `🔄 <b>به‌روزرسانی همهٔ پنل‌ها</b>\n\n` +
     `${toPersianDigits(input.count)} پنل شما روی نسخهٔ قدیمی‌تر هستند و می‌توانند به نسخهٔ ` +
     `<code>${escapeTelegram(input.to)}</code> ارتقا یابند.\n\n` +
     `فقط اسکریپت Worker جایگزین می‌شود؛ پایگاه دادهٔ هر پنل (کاربران، تنظیمات و کتابخانهٔ ` +
-    `کانفیگ‌های اکسترنال) و تغییرات سفارشی نسخه حفظ می‌شود.\n\nادامه می‌دهید؟`,
+    `کانفیگ‌های اکسترنال) و تغییرات سفارشی نسخه حفظ می‌شود.` +
+    (input.changelog ?? "") +
+    `\n\nادامه می‌دهید؟`,
   updateAllNone: "✅ همهٔ پنل‌های شما روی آخرین نسخهٔ تأییدشده هستند.",
   updateAllSummary: (input: { queued: number; busy: number; plan: number; capacity: number; other: number; to: string }) => {
     const lines = [`🚀 به‌روزرسانی ${toPersianDigits(input.queued)} پنل به نسخهٔ <code>${escapeTelegram(input.to)}</code> آغاز شد.`];
@@ -208,11 +243,13 @@ export const fa = {
   },
 
   // Admin: same bulk update across every tenant's opened panels.
-  adminUpdateAllConfirm: (input: { count: number; to: string }) =>
+  adminUpdateAllConfirm: (input: { count: number; to: string; changelog?: string }) =>
     `🔄 <b>به‌روزرسانی همهٔ پنل‌های باز سیستم</b>\n\n` +
     `${toPersianDigits(input.count)} پنل فعال در کل سیستم روی نسخهٔ قدیمی‌تر هستند.\n` +
     `نسخهٔ مقصد: <code>${escapeTelegram(input.to)}</code>\n\n` +
-    `برای هر صاحب پنل، پیام پیشرفت در گفت‌وگوی خودش ارسال می‌شود و داده‌ها دست‌نخورده می‌مانند.\n\nادامه می‌دهید؟`,
+    `برای هر صاحب پنل، پیام پیشرفت در گفت‌وگوی خودش ارسال می‌شود و داده‌ها دست‌نخورده می‌مانند.` +
+    (input.changelog ?? "") +
+    `\n\nادامه می‌دهید؟`,
   adminUpdateAllSummary: (input: { queued: number; busy: number; plan: number; capacity: number; other: number; to: string }) => {
     const lines = [`🚀 به‌روزرسانی ${toPersianDigits(input.queued)} پنل به نسخهٔ <code>${escapeTelegram(input.to)}</code> در صف قرار گرفت.`];
     if (input.busy > 0) lines.push(`⏳ ${toPersianDigits(input.busy)} پنل مشغول بودند.`);
@@ -224,15 +261,24 @@ export const fa = {
 
   // Cron-driven notice: a newer approved panel version is available. The
   // one-tap button routes into panel:update_go, so the update runs through the
-  // exact same job pipeline as the manual flow.
-  updateNotifyAvailable: (input: { workerName: string; from: string; to: string }) =>
+  // exact same job pipeline as the manual flow. UPDRELEASE-1: the notice
+  // carries the release changelog of the target version (vs the installed one).
+  updateNotifyAvailable: (input: { workerName: string; from: string; to: string; changelog?: string }) =>
     `🆙 <b>به‌روزرسانی جدید برای پنل شما در دسترس است</b>\n\n` +
     `• پنل: <b>${escapeTelegram(input.workerName)}</b>\n` +
     `• نسخهٔ نصب‌شده: <code>${escapeTelegram(input.from)}</code>\n` +
     `• نسخهٔ جدید: <code>${escapeTelegram(input.to)}</code>\n\n` +
     `با زدن دکمهٔ زیر، پنل روی حساب Cloudflare خودتان به نسخهٔ جدید ارتقا می‌یابد.\n` +
     `داده‌های پنل (کاربران، تنظیمات و کتابخانهٔ کانفیگ‌های اکسترنال) روی همان پایگاه D1 باقی می‌مانند و ` +
-    `تغییرات سفارشی نسخه نیز در به‌روزرسانی حفظ می‌شود.`,
+    `تغییرات سفارشی نسخه نیز در به‌روزرسانی حفظ می‌شود.` +
+    (input.changelog ?? ""),
+
+  // Update/redeploy completion (UPDRELEASE-1): states the now-active version
+  // and lists the release changelog that just shipped with the update.
+  updateDone: (input: { title: string; version: string; changelog?: string }) =>
+    `✅ <b>${escapeTelegram(input.title)}</b> با موفقیت انجام شد.\n` +
+    `نسخهٔ فعال پنل اکنون <code>${escapeTelegram(input.version)}</code> است.` +
+    (input.changelog ?? ""),
 
   backupNotAllowed: "پلن فعلی شما امکان پشتیبان‌گیری ندارد.",
   backupStart: "💾 تهیهٔ نسخهٔ پشتیبان شروع شد. نتیجه اطلاع داده می‌شود.",

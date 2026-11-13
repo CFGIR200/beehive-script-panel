@@ -227,6 +227,43 @@ describe("update notifications", () => {
     expect(sent[0]!.raw).toContain("panel:update_go:");
   });
 
+  it("announces the release changelog of the target version relative to the installed one", async () => {
+    // UPDRELEASE-1: migration 0009 seeds changelog_fa for the release build;
+    // a panel on the vendor build must see the changes named against its own
+    // installed version in the cron notice.
+    const setup = await seedSetup(9112, "upd-changelog");
+    await seedPanel(setup.userId, setup.accountRef, "bee-changelog");
+
+    const result = await runUpdateCheck(testEnv, config, telegram);
+    expect(result.notified).toBe(1);
+    expect(sent[0]!.text).toContain(
+      `تغییرات نسخهٔ <code>${config.artifactVersion}</code> نسبت به نسخهٔ <code>3.1.12</code>`,
+    );
+    expect(sent[0]!.text).toContain("• کانفیگ‌های اکسترنال");
+    expect(sent[0]!.raw).toContain("panel:update_go:");
+  });
+
+  it("still notifies when the release row carries no changelog", async () => {
+    const setup = await seedSetup(9113, "upd-nochangelog");
+    await seedPanel(setup.userId, setup.accountRef, "bee-nochangelog");
+    const row = await testEnv.DB.prepare("SELECT changelog_fa FROM panel_versions WHERE version = ?")
+      .bind(config.artifactVersion)
+      .first<{ changelog_fa: string | null }>();
+    await testEnv.DB.prepare("UPDATE panel_versions SET changelog_fa = NULL WHERE version = ?")
+      .bind(config.artifactVersion)
+      .run();
+    try {
+      const result = await runUpdateCheck(testEnv, config, telegram);
+      expect(result.notified).toBe(1);
+      expect(sent[0]!.text).toContain("به‌روزرسانی جدید");
+      expect(sent[0]!.text).not.toContain("📋");
+    } finally {
+      await testEnv.DB.prepare("UPDATE panel_versions SET changelog_fa = ? WHERE version = ?")
+        .bind(row?.changelog_fa ?? null, config.artifactVersion)
+        .run();
+    }
+  });
+
   it("never notifies when the approved digest does not match the registry", async () => {
     // Half-applied release (var bumped, migration not run): the cron must
     // refuse to push customers toward a target the deploy path cannot verify.

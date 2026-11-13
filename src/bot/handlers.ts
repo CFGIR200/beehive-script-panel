@@ -8,7 +8,7 @@
 
 import type { BotContext } from "./context";
 import { errorText } from "./context";
-import { fa } from "./messages";
+import { fa, changelogBlock } from "./messages";
 import {
   accountsKeyboard,
   accountDetailKeyboard,
@@ -320,16 +320,30 @@ export function summarizeUpdateBatch(batch: UpdateBatchResult, to: string): {
  * the Worker script, so customer data and the baked-in patches always survive.
  */
 export async function confirmUpdateAll(ctx: BotContext): Promise<void> {
-  const count = await panelsRepo.countOutdatedForUser(ctx.env, ctx.identity.user.id, ctx.config.artifactVersion, ctx.config.artifactSha256);
-  if (!count) {
+  const rows = await panelsRepo.listOutdatedForUser(ctx.env, {
+    userId: ctx.identity.user.id,
+    latestVersion: ctx.config.artifactVersion,
+    expectedSha256: ctx.config.artifactSha256,
+  });
+  if (!rows.length) {
     await ctx.edit(fa.updateAllNone, { reply_markup: backToMainKeyboard() });
     return;
   }
-  await ctx.edit(fa.updateAllConfirm({ count, to: ctx.config.artifactVersion }), {
+  // UPDRELEASE-1: show the release changelog of the target version in the
+  // confirmation. When every outdated panel sits on the same installed version
+  // the heading names it explicitly ("نسبت به نسخهٔ …").
+  const registered = await panelsRepo.findVersion(ctx.env, ctx.config.artifactVersion);
+  const distinctFrom = [...new Set(rows.map((row) => row.version))];
+  const changelog = changelogBlock({
+    to: ctx.config.artifactVersion,
+    from: distinctFrom.length === 1 ? distinctFrom[0] : null,
+    changelogFa: registered?.changelog_fa,
+  });
+  await ctx.edit(fa.updateAllConfirm({ count: rows.length, to: ctx.config.artifactVersion, changelog }), {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
-        [{ text: `✅ به‌روزرسانی همه (${count} پنل)`, callback_data: "panel:update_all_go" }],
+        [{ text: `✅ به‌روزرسانی همه (${rows.length} پنل)`, callback_data: "panel:update_all_go" }],
         [{ text: "🔙 بازگشت", callback_data: "panel:list" }],
       ],
     },
@@ -462,12 +476,20 @@ export async function showUpdateOptions(ctx: BotContext, panelId: number): Promi
   const staleBuildNote = versionCurrent && !buildCurrent
     ? `⚠️ نسخهٔ نصب‌شده درست است اما <b>بیلدِ قدیمی</b> (بدون پچ‌های BEEHIVE) است؛ با به‌روزرسانی، بیلدِ پچ‌شدهٔ همین نسخه جایگزین می‌شود.\n\n`
     : "";
+  // UPDRELEASE-1: the confirm screen announces the release changelog of the
+  // target version relative to the panel's installed version.
+  const changelog = changelogBlock({
+    to: ctx.config.artifactVersion,
+    from: panel.version,
+    changelogFa: registered?.changelog_fa,
+  });
   await ctx.edit(
     `🔄 به‌روزرسانی پنل <b>${escape(panel.worker_name)}</b>\n\n` +
       staleBuildNote +
       `نسخهٔ فعلی: <code>${escape(panel.version ?? "—")}</code>\n` +
       `نسخهٔ مقصد: <code>${escape(ctx.config.artifactVersion)}</code>\n\n` +
-      `داده‌های پنل روی همان پایگاه D1 می‌مانند و بازنویسی نمی‌شوند.`,
+      `داده‌های پنل روی همان پایگاه D1 می‌مانند و بازنویسی نمی‌شوند.` +
+      changelog,
     {
       parse_mode: "HTML",
       reply_markup: {

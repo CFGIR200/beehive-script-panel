@@ -8,7 +8,7 @@
 
 import type { BotContext } from "./context";
 import { errorText } from "./context";
-import { fa } from "./messages";
+import { fa, changelogBlock } from "./messages";
 import {
   adminGrantPlanKeyboard,
   adminJobsKeyboard,
@@ -376,16 +376,29 @@ export async function adminToggleSetting(
  */
 export async function adminUpdateAllPrompt(ctx: BotContext): Promise<void> {
   requireAdmin(ctx);
-  const count = await panelsRepo.countOutdatedAll(ctx.env, ctx.config.artifactVersion, ctx.config.artifactSha256);
-  if (!count) {
+  // One query feeds both the count and the changelog heading: the run step
+  // queues from the same listOutdatedAll window, so the numbers stay in sync.
+  const rows = await panelsRepo.listOutdatedAll(ctx.env, {
+    latestVersion: ctx.config.artifactVersion,
+    expectedSha256: ctx.config.artifactSha256,
+  });
+  if (!rows.length) {
     await ctx.edit(fa.updateAllNone, { reply_markup: adminKeyboard() });
     return;
   }
-  await ctx.edit(fa.adminUpdateAllConfirm({ count, to: ctx.config.artifactVersion }), {
+  // UPDRELEASE-1: release changelog of the target version in the admin confirm.
+  const registered = await panelsRepo.findVersion(ctx.env, ctx.config.artifactVersion);
+  const distinctFrom = [...new Set(rows.map((row) => row.version))];
+  const changelog = changelogBlock({
+    to: ctx.config.artifactVersion,
+    from: distinctFrom.length === 1 ? distinctFrom[0] : null,
+    changelogFa: registered?.changelog_fa,
+  });
+  await ctx.edit(fa.adminUpdateAllConfirm({ count: rows.length, to: ctx.config.artifactVersion, changelog }), {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
-        [{ text: `✅ به‌روزرسانی همه (${count} پنل)`, callback_data: "adm:update_all_go" }],
+        [{ text: `✅ به‌روزرسانی همه (${rows.length} پنل)`, callback_data: "adm:update_all_go" }],
         [{ text: "🔙 پنل مدیریت", callback_data: "adm:home" }],
       ],
     },

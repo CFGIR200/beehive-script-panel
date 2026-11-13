@@ -100,8 +100,8 @@ describe("install job", () => {
     const { user, account } = await freshTenant(9003);
 
     // Corrupt the approved hash for the version under test.
-    await env.DB.prepare("UPDATE panel_versions SET artifact_sha256 = ? WHERE version = '3.1.13'")
-      .bind("0".repeat(64))
+    await env.DB.prepare("UPDATE panel_versions SET artifact_sha256 = ? WHERE version = ?")
+      .bind("0".repeat(64), config.artifactVersion)
       .run();
 
     const started = await engine.startInstall(testEnv, config, {

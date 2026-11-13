@@ -22,7 +22,7 @@
 
 import type { Env, PublicConfig } from "../config/env";
 import type { TelegramClient } from "../bot/telegram";
-import { fa } from "../bot/messages";
+import { fa, changelogBlock } from "../bot/messages";
 import { cb } from "../bot/keyboards";
 import { startUpdateBatch } from "../provisioning/engine";
 import * as panelsRepo from "../database/repositories/panels";
@@ -162,10 +162,17 @@ export async function runUpdateCheck(
   result.outdated = candidates.length;
 
   for (const candidate of candidates) {
+    // UPDRELEASE-1: the notice announces what changed in the target version
+    // (changelog_fa of the registry row) relative to the installed version.
     const text = fa.updateNotifyAvailable({
       workerName: candidate.worker_name,
       from: candidate.version,
       to: config.artifactVersion,
+      changelog: changelogBlock({
+        to: config.artifactVersion,
+        from: candidate.version,
+        changelogFa: registered.changelog_fa,
+      }),
     });
     try {
       await telegram.sendMessage(candidate.user_telegram_id, text, {

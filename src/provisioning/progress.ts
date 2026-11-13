@@ -11,7 +11,7 @@ import type { Env, PublicConfig } from "../config/env";
 import * as jobsRepo from "../database/repositories/jobs";
 import * as panelsRepo from "../database/repositories/panels";
 import { TelegramClient } from "../bot/telegram";
-import { fa } from "../bot/messages";
+import { fa, changelogBlock } from "../bot/messages";
 import { jobKeyboard } from "../bot/keyboards";
 import { createLogger } from "../utils/logger";
 import { formatDurationFa } from "../utils/time";
@@ -73,6 +73,20 @@ export async function reportJobProgress(env: Env, config: PublicConfig, jobId: s
       if (job.kind === "delete") {
         const panel = job.panel_id ? await panelsRepo.findById(env, job.panel_id) : null;
         await sendOrEdit(env, telegram, job, fa.deleteDone(panel?.worker_name ?? "—"), { parse_mode: "HTML" });
+        return;
+      }
+      if (job.kind === "update" || job.kind === "redeploy") {
+        // UPDRELEASE-1: the completion message states the now-active version
+        // and announces the release changelog that just shipped.
+        const panel = job.panel_id ? await panelsRepo.findById(env, job.panel_id) : null;
+        const version = result?.version ?? panel?.version ?? "—";
+        const registered = await panelsRepo.findVersion(env, version);
+        const text = fa.updateDone({
+          title: jobTitle(job.kind),
+          version,
+          changelog: changelogBlock({ to: version, changelogFa: registered?.changelog_fa }),
+        });
+        await sendOrEdit(env, telegram, job, text, { parse_mode: "HTML", reply_markup: jobKeyboard(job.id) });
         return;
       }
       await sendOrEdit(env, telegram, job, fa.jobCompleted(jobTitle(job.kind)), { parse_mode: "HTML" });

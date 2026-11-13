@@ -120,3 +120,15 @@ Five defects found by the suite were fixed before release (see `docs/TESTING.md`
   `update_auto_apply` cron; the update screen shows a dedicated "stale build" note for them. The cron
   refuses to notify when `PANEL_ARTIFACT_SHA256` disagrees with the `panel_versions` registry (half-applied
   release guard). Tests: 116 across 11 files, `tsc --noEmit` clean. See `docs/UPDATES.md` §1.
+* **UPDRELEASE-1** — panel release **3.1.14** + release changelog in the bot. The first BEEHIVE release
+  build: the approved patched artifact (PATCH-1/2 logic byte-identical) with its version identity
+  realigned to `3.1.14` (payload header `DCVERSION`, the embedded panel `VERSION` constant — the vendor
+  bundle still reported `3.1.12` — and the bundle line-0 header), so patched builds are distinguishable
+  from vendor builds in the panel UI itself. Built deterministically with the new
+  `bump-version` mode of `scripts/patch-panel-bundle.mjs`
+  (sha256 `d825b8f1e8e8f3789f4d536f687a5dc309b6cd771fc0f0a93838ac5cfe016207`). The registry gains a
+  `changelog_fa` column (migration `0009`): Persian "changes vs the previous release" bullets the bot
+  renders in every update surface — the cron notice, the per-panel update confirmation, both
+  "به‌روزرسانی همه" confirmations (user + admin) and the update-completion message. Operators write the
+  changelog once per release into the migration; the bot handles rendering/escaping. Tests: 123 across
+  12 files, `tsc --noEmit` clean. See `docs/UPDATES.md` §6.

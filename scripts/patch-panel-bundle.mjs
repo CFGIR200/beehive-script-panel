@@ -24,10 +24,13 @@
  *   node scripts/patch-panel-bundle.mjs check  <bundle.js>
  *   node scripts/patch-panel-bundle.mjs decode <bundle.js> [--out payload.js]
  *   node scripts/patch-panel-bundle.mjs encode --payload payload.js --base <bundle.js> --out <out.js>
+ *   node scripts/patch-panel-bundle.mjs bump-version --base <bundle.js> --to <x.y.z> --out <out.js>
  *
- * `patch` fails loudly when an anchor is not found exactly once — that is the
- * signal that the upstream bundle drifted and the patch set must be re-ported
- * (docs/UPDATES.md §4).
+ * `bump-version` (UPDRELEASE-1) derives a BEEHIVE release build from an already
+ * patched bundle: it rewrites the payload header `/* Bee.Hive Panel · DCVERSION:x.y.z *​/`
+ * comment, the panel's embedded `VERSION = "x.y.z"` config constant and the
+ * bundle's own line-0 header to the new version, then re-encodes with the same
+ * key. Every other byte stays identical, so the PATCH sentinels keep passing.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -196,6 +199,64 @@ function readArg(flag) {
 
 const mode = process.argv[2];
 
+/** Literal replacement helper: String.replace would mangle `$` sequences. */
+function replaceOnce(text, find, replace, label) {
+  const count = text.split(find).length - 1;
+  if (count === 0) fail(`${label}: pattern not found`);
+  if (count > 1) fail(`${label}: pattern matches ${count} times`);
+  return text.replace(find, () => replace);
+}
+
+const VERSION_RE = /\d+\.\d+\.\d+/;
+
+function bumpVersion() {
+  const base = readFileSync(readArg("--base"), "utf8");
+  const to = readArg("--to");
+  if (!VERSION_RE.test(to) || to !== to.trim()) fail(`--to must be an x.y.z version string, got "${to}"`);
+  const { payload, key } = decodeBundle(base);
+
+  // 1) payload header comment: /* Bee.Hive Panel · DCVERSION:old */
+  const payloadLines = payload.split("\n");
+  const headerMatch = /^\/\* Bee\.Hive Panel · DCVERSION:(\d+\.\d+\.\d+) \*\/$/.exec(payloadLines[0] ?? "");
+  if (!headerMatch) fail("payload header comment (/* Bee.Hive Panel · DCVERSION:x.y.z */) not found on line 1");
+  const fromHeader = headerMatch[1];
+  payloadLines[0] = `/* Bee.Hive Panel · DCVERSION:${to} */`;
+  const bumpedPayload = payloadLines.join("\n");
+
+  // 2) embedded panel config constant: VERSION = "old";
+  const versionMatches = bumpedPayload.match(/\bVERSION\s*=\s*"\d+\.\d+\.\d+"/g) ?? [];
+  if (versionMatches.length !== 1) {
+    fail(`VERSION = "x.y.z" config constant matches ${versionMatches.length} times (expected exactly 1)`);
+  }
+  const fromConfig = /\d+\.\d+\.\d+/.exec(versionMatches[0])[0];
+  const nextPayload = replaceOnce(bumpedPayload, versionMatches[0], `VERSION = "${to}"`, "config VERSION constant");
+
+  // 3) re-encode with the vendor key and splice back into the wrapper.
+  let out = spliceBundle(base, encodePayload(nextPayload, key));
+
+  // 4) bundle line-0 header (must keep its BEEHIVE-PATCH marker for `check`).
+  const lines = out.split("\n");
+  const line0 = lines[0] ?? "";
+  if (!line0.startsWith("/*")) fail("bundle line 0 is not a header comment");
+  const dcCount = (line0.match(/DCVERSION:\d+\.\d+\.\d+/g) ?? []).length;
+  if (dcCount !== 1) fail(`line-0 DCVERSION matches ${dcCount} times (expected exactly 1)`);
+  const fromLine0 = /DCVERSION:(\d+\.\d+\.\d+)/.exec(line0)[1];
+  lines[0] = line0.replace(/DCVERSION:\d+\.\d+\.\d+/, `DCVERSION:${to}`);
+  if (!lines[0].includes("BEEHIVE-PATCH")) fail("line-0 header lost its BEEHIVE-PATCH marker");
+  out = lines.join("\n");
+
+  writeFileSync(readArg("--out"), out);
+  console.error(`payload header  : DCVERSION ${fromHeader} -> ${to}`);
+  console.error(`panel VERSION   : ${fromConfig} -> ${to}`);
+  console.error(`bundle header   : DCVERSION ${fromLine0} -> ${to}`);
+  const sha = report(out);
+  const expected = process.argv.includes("--expect-sha") ? readArg("--expect-sha").toLowerCase() : null;
+  if (expected && expected !== sha) {
+    console.error(`error: sha mismatch (expected ${expected})`);
+    process.exit(1);
+  }
+}
+
 if (mode === "decode") {
   const bundle = readFileSync(process.argv[3] ?? fail("usage: decode <bundle.js>"), "utf8");
   const { payload } = decodeBundle(bundle);
@@ -259,6 +320,8 @@ if (mode === "decode") {
     console.log("verdict: BEEHIVE-PATCH build (all groups present)");
   }
   report(bundle);
+} else if (mode === "bump-version") {
+  bumpVersion();
 } else {
-  fail("usage: patch-panel-bundle.mjs <patch|check|decode|encode> …");
+  fail("usage: patch-panel-bundle.mjs <patch|check|decode|encode|bump-version> …");
 }
