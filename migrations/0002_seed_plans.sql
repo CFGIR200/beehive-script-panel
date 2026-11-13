@@ -24,8 +24,8 @@ INSERT INTO panel_versions
 VALUES
   ('3.1.13',
    'panel/beehive-panel-3.1.13.js',
-   '7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0',
+   '0e164a0a8f985e9024ebd1a7de059dedd0915e132638e93513290687eb963cd4',
    '2025-03-10',
-   'BEEHIVE-PATCH-1 build: external raw configs are gated by user activity/quota (see docs/PATCH-EXTERNAL-CONFIGS.md). Bundle header declares DCVERSION 3.1.13; the embedded config constant reads 3.1.12 (see docs/INITIAL_AUDIT.md §4).',
+   'BEEHIVE-PATCH-1/2 build: external raw configs are gated by user activity/quota; the panel-level external-config library supports bulk-apply to users and auto-include into every active subscription (see docs/PATCH-EXTERNAL-CONFIGS.md). Bundle header declares DCVERSION 3.1.13; the embedded config constant reads 3.1.12 (see docs/INITIAL_AUDIT.md §4).',
    1, 0)
 ON CONFLICT (version) DO NOTHING;

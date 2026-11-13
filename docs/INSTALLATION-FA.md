@@ -174,7 +174,7 @@ node scripts/upload-panel-artifact.mjs --file panel/beehive-panel-3.1.13.js
 خروجی باید این sha256 را نشان بدهد (همان مقداری که در `wrangler.toml` پین شده):
 
 ```
-7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0
+0e164a0a8f985e9024ebd1a7de059dedd0915e132638e93513290687eb963cd4
 ```
 
 اگر عدد فرق داشت، یعنی فایل پنل دست‌کاری شده — deploy نکنید.

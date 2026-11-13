@@ -53,8 +53,8 @@ Print this and tick every box. A deployment is not "done" until all items are ch
 ## 7. Panel artifact
 
 - [ ] `node scripts/upload-panel-artifact.mjs --file panel/beehive-panel-3.1.13.js`
-- [ ] Printed SHA-256 = `7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0`
-- [ ] `npx wrangler r2 object get beehive-artifacts/panel/beehive-panel-3.1.13.js --file /tmp/check.js` succeeds and `/tmp/check.js` is 9,044,381 bytes
+- [ ] Printed SHA-256 = `0e164a0a8f985e9024ebd1a7de059dedd0915e132638e93513290687eb963cd4`
+- [ ] `npx wrangler r2 object get beehive-artifacts/panel/beehive-panel-3.1.13.js --file /tmp/check.js` succeeds and `/tmp/check.js` is 9,077,186 bytes
 
 ## 8. Deploy
 

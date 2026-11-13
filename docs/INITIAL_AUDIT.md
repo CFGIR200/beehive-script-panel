@@ -6,11 +6,19 @@ Scope: every artefact supplied in the request, audited before any code was writt
 
 > **2026-11-13 — BEEHIVE-PATCH-1 addendum:** the approved bundle was rebuilt with
 > PATCH-1 (`docs/PATCH-EXTERNAL-CONFIGS.md`): per-user external raw configs are no
-> longer served to inactive/exhausted users. New pinned digest:
+> longer served to inactive/exhausted users. Intermediate pinned digest:
 > `7381d693589a7699496d8ca86f6fc020199bb7e092d81b02d54d72f0f8919bc0`.
 > The obfuscation scheme, loader and §3 findings are unchanged; only the two
-> subscription-serving code paths described in the patch note were modified, and the
-> gzip size dropped from 2,946,628 to 2,785,507 bytes.
+> subscription-serving code paths described in the patch note were modified.
+>
+> **2026-11-13 — BEEHIVE-PATCH-2 addendum:** rebuilt again with PATCH-2
+> (`docs/PATCH-EXTERNAL-CONFIGS.md`): external-config library bulk-apply to users
+> (`POST /api/external-configs/apply` + `apply_external` bulk action) and an
+> auto-include toggle that merges the resolved library into every active,
+> within-quota subscription. Current pinned digest:
+> `0e164a0a8f985e9024ebd1a7de059dedd0915e132638e93513290687eb963cd4`
+> (9,077,186 bytes; gzip -9 2,805,266 bytes — under the 3 MB free-plan limit).
+> Obfuscation scheme, loader and §3 findings remain unchanged.
 
 ---
 
